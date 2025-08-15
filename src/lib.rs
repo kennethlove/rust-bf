@@ -70,10 +70,8 @@ impl Brainfuck {
         }
     }
 
-    /// Execute the Brainfuck program until completion.
-    ///
-    /// Returns `Ok(())` on success or a [`BrainfuckErrors`] on failure.
-    pub fn run(&mut self) -> Result<(), BrainfuckErrors> {
+    /// Internal executor shared by run and run_debug.
+    fn execute(&mut self, debug: bool) -> Result<(), BrainfuckErrors> {
         let mut code_ptr = 0;
         let chars: Vec<char> = self.code.chars().collect();
         let code_len = chars.len();
@@ -101,72 +99,130 @@ impl Brainfuck {
             }
         }
 
+        let mut step: usize = 0;
+        if debug {
+            println!("STEP | IP  | PTR | CELL | INSTR | ACTION");
+            println!("-----+-----+-----+------+-------+------------------------------------------------");
+        }
+
         while code_ptr < code_len {
-            match chars[code_ptr] {
+            let instr = chars[code_ptr];
+            let (ptr_before, cell_before) = (self.pointer, self.memory[self.pointer]);
+            let mut action: Option<String> = if debug { Some(String::new()) } else { None };
+
+            match instr {
                 '>' => {
                     if self.pointer >= self.memory.len() - 1 {
                         return Err(BrainfuckErrors::PointerOutOfBounds);
                     }
                     self.pointer += 1;
+                    if let Some(a) = action.as_mut() { *a = format!("Moved pointer head to index {}", self.pointer); }
                 }
                 '<' => {
                     if self.pointer == 0 {
                         return Err(BrainfuckErrors::PointerOutOfBounds);
                     }
                     self.pointer -= 1;
+                    if let Some(a) = action.as_mut() { *a = format!("Moved pointer head to index {}", self.pointer); }
                 }
                 '+' => {
-                    self.memory[self.pointer] = self.memory[self.pointer].wrapping_add(1);
+                    let after = self.memory[self.pointer].wrapping_add(1);
+                    self.memory[self.pointer] = after;
+                    if let Some(a) = action.as_mut() { *a = format!("Increment cell[{}] from {} to {}", ptr_before, cell_before, after); }
                 }
                 '-' => {
-                    self.memory[self.pointer] = self.memory[self.pointer].wrapping_sub(1);
+                    let after = self.memory[self.pointer].wrapping_sub(1);
+                    self.memory[self.pointer] = after;
+                    if let Some(a) = action.as_mut() { *a = format!("Decrement cell[{}] from {} to {}", ptr_before, cell_before, after); }
                 }
                 '.' => {
-                    // Print the current cell as a character without adding a newline
-                    print!("{}", self.memory[self.pointer] as char);
+                    if debug {
+                        if let Some(a) = action.as_mut() { *a = format!("Output byte '{}' (suppressed in debug)", self.memory[self.pointer] as char); }
+                    } else {
+                        print!("{}", self.memory[self.pointer] as char);
+                    }
                 }
                 ',' => {
-                    // Read exactly one byte from stdin into the current cell.
-                    // On EOF, set the current cell to 0.
-                    use std::io::Read;
-                    let mut buf = [0u8; 1];
-                    match std::io::stdin().read(&mut buf) {
-                        Ok(0) => {
-                            // EOF: common BF behavior is to set cell to 0
-                            self.memory[self.pointer] = 0;
+                    if debug {
+                        self.memory[self.pointer] = 0; // simulate EOF
+                        if let Some(a) = action.as_mut() { *a = "Read byte from stdin -> simulated EOF (set cell to 0)".to_string(); }
+                    } else {
+                        // Read exactly one byte from stdin into the current cell.
+                        // On EOF, set the current cell to 0.
+                        use std::io::Read;
+                        let mut buf = [0u8; 1];
+                        match std::io::stdin().read(&mut buf) {
+                            Ok(0) => {
+                                // EOF: common BF behavior is to set cell to 0
+                                self.memory[self.pointer] = 0;
+                            }
+                            Ok(_) => {
+                                self.memory[self.pointer] = buf[0];
+                            }
+                            Err(e) => {
+                                return Err(BrainfuckErrors::IoError(e));
+                            }
                         }
-                        Ok(_) => {
-                            self.memory[self.pointer] = buf[0];
-                        }
-                        Err(e) => {
-                            return Err(BrainfuckErrors::IoError(e));
-                        }
+                        if let Some(a) = action.as_mut() { *a = format!("Read byte from stdin -> {}", self.memory[self.pointer]); }
                     }
                 }
                 '[' => {
-                    // If the current cell is zero, jump forward to the command after
-                    // the matching ']' (supports nested loops via a counter).
                     if self.memory[self.pointer] == 0 {
                         let j = jump_map[code_ptr].expect("validated bracket");
+                        if let Some(a) = action.as_mut() { *a = format!("Cell is 0; jump forward to matching ']' at IP {}", j); }
                         code_ptr = j;
+                    } else if let Some(a) = action.as_mut() {
+                        *a = "Enter loop (cell != 0)".to_string();
                     }
                 }
                 ']' => {
-                    // If the current cell is non-zero, jump back to the matching '['.
                     if self.memory[self.pointer] != 0 {
                         let j = jump_map[code_ptr].expect("validated bracket");
+                        if let Some(a) = action.as_mut() { *a = format!("Cell != 0; jump back to matching '[' at IP {}", j); }
                         code_ptr = j;
+                    } else if let Some(a) = action.as_mut() {
+                        *a = "Exit loop (cell is 0)".to_string();
                     }
                 }
                 _ => {
                     return Err(BrainfuckErrors::InvalidCharacter);
                 }
             }
+
+            if debug {
+                println!(
+                    "{:<4} | {:<3} | {:<3} | {:<4} |  {}    | {}",
+                    step,
+                    code_ptr,
+                    ptr_before,
+                    cell_before,
+                    instr,
+                    action.unwrap_or_default()
+                );
+                step += 1;
+            }
+
             // Move to the next instruction
             code_ptr += 1;
         }
-        
+
         Ok(())
+    }
+
+    /// Execute the Brainfuck program until completion.
+    ///
+    /// Returns `Ok(())` on success or a [`BrainfuckErrors`] on failure.
+    pub fn run(&mut self) -> Result<(), BrainfuckErrors> {
+        self.execute(false)
+    }
+
+    /// Debug-run the Brainfuck program, printing a step-by-step table of operations
+    /// instead of producing I/O side effects. The interpreter state (pointer, memory)
+    /// advances exactly as it would during a real run, but:
+    /// - '.' does not print the character; we log the action instead
+    /// - ',' does not read from stdin; we simulate EOF and set the cell to 0 and log
+    pub fn run_debug(&mut self) -> Result<(), BrainfuckErrors> {
+        self.execute(true)
     }
 }
 

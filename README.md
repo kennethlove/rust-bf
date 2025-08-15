@@ -9,6 +9,7 @@ A tiny Brainfuck interpreter written in Rust, exposed as both a library and a si
 - Proper handling of nested loops `[]`; unmatched brackets are an error
 - Any non-Brainfuck character results in an error
 - Arithmetic wraps at 8 bits (`u8`) for `+` and `-`
+- Debug mode (`--debug` or `-d`) prints a step-by-step execution table instead of performing I/O
 
 ## Install / Build
 
@@ -31,6 +32,10 @@ Examples:
   - `printf 'Z' | cargo run --bin bf_runner -- ",."`
   - Output: `Z` followed by a newline from the CLI
 
+- Debug mode (prints a table instead of executing I/O)
+  - `cargo run --bin bf_runner -- --debug ">+.<"`
+  - Useful for understanding control flow; `,` behaves as EOF (cell set to 0) and `.` output is suppressed
+
 Notes:
 - Non-Brainfuck characters cause an error.
 - Unmatched `[` or `]` cause an error.
@@ -49,6 +54,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut bf = Brainfuck::new(code.to_string());
     bf.run()?;
     println!(); // optional: newline for readability
+    Ok(())
+}
+```
+
+Debug run (no real I/O; prints a table):
+
+```rust,no_run
+use rust_bf::Brainfuck;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let code = ">+.<"; // simple program
+    let mut bf = Brainfuck::new(code.to_string());
+    bf.run_debug()?; // prints a step-by-step table
     Ok(())
 }
 ```
@@ -76,12 +94,19 @@ let _ = bf.run();
 ## Testing
 
 - Unit tests live in `src/lib.rs`.
-- An integration test verifies stdin handling for the CLI: `tests/stdin_read.rs`.
+- Integration tests:
+  - `tests/stdin_read.rs` verifies stdin handling for the CLI
+  - `tests/debug_flag.rs` verifies the `--debug` table output
 - Run all tests with: `cargo test`
 
 ## Examples
 
 - `examples/usage.rs` shows a minimal library usage example.
+- `examples/debug.rs` shows how to run a program in debug mode (prints a step-by-step table).
+
+Run:
+- `cargo run --example usage`
+- `cargo run --example debug`
 
 ## License
 
