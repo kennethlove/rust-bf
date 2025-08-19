@@ -1,4 +1,4 @@
-use rust_bf::Brainfuck;
+use rust_bf::BrainfuckReader;
 use std::env;
 
 fn print_usage_and_exit(program: &str) -> ! {
@@ -37,7 +37,7 @@ fn main() {
 
     let code = code_parts.join("");
 
-    let mut bf = Brainfuck::new(code);
+    let mut bf = BrainfuckReader::new(code);
 
     let result = if debug { bf.run_debug() } else { bf.run() };
 
