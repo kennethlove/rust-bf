@@ -317,14 +317,30 @@ fn repl_loop() -> io::Result<()> {
 }
 
 fn read_submission(stdin: &mut io::StdinLock) -> Option<String> {
-    let mut line = String::new();
-    if stdin.read_line(&mut line).is_ok() {
-        if line.is_empty() {
-            return None; // EOF or empty line
+    // Collect all lines until EOF
+    let mut buffer = String::new();
+    
+    loop {
+        let mut line = String::new();
+        match stdin.read_line(&mut line) {
+            Ok(0) => {
+                // EOF
+                break;
+            }
+            Ok(_) => {
+                buffer.push_str(&line);
+            }
+            Err(_) => {
+                // Read error, ignore
+                return None;
+            }
         }
-        Some(line)
+    }
+    
+    if buffer.is_empty() {
+        None
     } else {
-        None // Read error
+        Some(buffer)
     }
 }
 
