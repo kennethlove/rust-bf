@@ -1,4 +1,4 @@
-use rust_bf::BrainfuckReader;
+use bf::BrainfuckReader;
 
 fn main() {
     // Classic Brainfuck "Hello World!" program

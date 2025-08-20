@@ -10,7 +10,7 @@
 //! Quick start:
 //!
 //! ```no_run
-//! use rust_bf::{BrainfuckWriter, WriterOptions};
+//! use bf::{BrainfuckWriter, WriterOptions};
 //!
 //! // Classic "Hello World!" in Brainfuck
 //! let input = "Hello World!".as_bytes();
@@ -173,7 +173,8 @@ impl<'writer> BrainfuckWriter<'writer> {
             }
 
             // Move value back to current cell and return pointer
-            seq.push_str("[<+>-]");
+            seq.push_str("[<+>-");
+            seq.push(']');
             seq.push('<'); // return to current cell
 
             if seq.len() < best_len {
