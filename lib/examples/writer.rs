@@ -1,4 +1,4 @@
-use rust_bf::{BrainfuckWriter, WriterOptions};
+use lib::{BrainfuckWriter, WriterOptions};
 
 fn main() {
     // Classic "Hello World!" in Brainfuck

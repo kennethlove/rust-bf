@@ -1,4 +1,4 @@
-use rust_bf::{BrainfuckReader, BrainfuckWriter};
+use lib::{BrainfuckReader, BrainfuckWriter};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -7,6 +7,7 @@ fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
         r#"Usage:
   {0} read  [--debug|-d] "<code>"     # Run Brainfuck code (args are concatenated)
+  {0} read  [--debug|-d] --file <PATH> # Run Brainfuck code loaded from file
   {0} write [--bytes] [TEXT...]        # Generate Brainfuck to print TEXT/STDIN/file
   {0} write [--bytes] --file <PATH>
 
@@ -19,7 +20,25 @@ Run "{0} <subcommand> --help" for more info.
 
 fn read_usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
-        "Usage:\n  {0} read [--debug|-d] \"<code>\"\n\nOptions:\n  --debug, -d   Print a step-by-step table of operations instead of executing\n  --help,  -h   Show this help\n\nNotes:\n- Input (`,`) reads a single byte from stdin; on EOF the current cell is set to 0.\n- Any characters outside of Brainfuck's ><+-.,[] will result in an error.\n",
+        r#"Usage:
+  {0} read [--debug|-d] "<code>"
+  {0} read [--debug|-d] --file <PATH>
+
+Options:
+  --file,  -f <PATH>  Read Brainfuck code from PATH instead of positional "<code>"
+  --debug, -d   Print a step-by-step table of operations instead of executing
+  --help,  -h   Show this help
+
+Notes:
+- Input (`,`) reads a single byte from stdin; on EOF the current cell is set to 0.
+- Any characters outside of Brainfuck's ><+-.,[] will result in an error.
+
+Examples:
+- Load Brainfuck code from a file:
+    {0} read --file ./program.bf
+- Read bytes from a file as stdin (`,` will consume file input):
+    {0} read ",[.,]" < input.txt
+"#,
         program
     );
     std::process::exit(code);
@@ -57,22 +76,47 @@ where
 {
     let mut debug = false;
     let mut code_parts: Vec<String> = Vec::new();
+    let mut file_path: Option<String> = None;
 
+    let mut it = args.into_iter();
     let mut saw_any = false;
-    for a in args {
+    while let Some(a) = it.next() {
         saw_any = true;
         match a.as_str() {
             "--debug" | "-d" => debug = true,
             "--help" | "-h" => return { read_usage_and_exit(program, 0) },
-            _ => code_parts.push(a),
+            "--file" | "-f" => {
+                let Some(p) = it.next() else {
+                    eprintln!("{program}: --file requires a path");
+                    return { read_usage_and_exit(program, 2) };
+                };
+                file_path = Some(p);
+            }
+            other => code_parts.push(other.to_string()),
         }
     }
 
-    if !saw_any || code_parts.is_empty() {
+    if !saw_any || (file_path.is_none() && code_parts.is_empty()) {
         read_usage_and_exit(program, 2);
     }
 
-    let code = code_parts.join("");
+    if file_path.is_some() && !code_parts.is_empty() {
+        eprintln!("{program}: cannot use positional code together with --file");
+        return { read_usage_and_exit(program, 2) };
+    }
+
+    let code = if let Some(path) = file_path {
+        match fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("{program}: failed to read code file as UTF-8: {e}");
+                return 1;
+            }
+        }
+    } else {
+        code_parts.join("")
+    };
+
     let mut bf = BrainfuckReader::new(code);
     let result = if debug { bf.run_debug() } else { bf.run() };
 
