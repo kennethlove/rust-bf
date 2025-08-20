@@ -290,7 +290,7 @@ fn repl_loop() -> io::Result<()> {
         let mut stdin = io::stdin().lock();
 
         // Read a line of Brainfuck code from stdin
-        print!("> ");
+        print!("bf> ");
         io::stdout().flush()?;
 
         let submission = read_submission(&mut stdin);
