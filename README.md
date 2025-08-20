@@ -41,6 +41,22 @@ Notes:
 - Unmatched `[` or `]` cause an error.
 - Moving the pointer out of bounds causes an error.
 
+## CLI usage (write)
+
+Generate Brainfuck code that prints the provided input.
+
+Examples:
+- From positional args (recommended with Cargo; note the `--` separator):
+  - `cargo run --bin write -- "Hello world"`
+- From STDIN (UTF-8 text):
+  - `echo -n 'Hello' | cargo run --bin write --`
+- From a file:
+  - `cargo run --bin write -- --file ./message.txt`
+- Raw bytes from a file:
+  - `cargo run --bin write -- --bytes --file ./image.bin`
+
+The output is Brainfuck code printed to stdout (a trailing newline is added for readability).
+
 ## Library usage
 
 Add this crate to your workspace or use it via a path dependency. Then:

@@ -13,8 +13,4 @@ fn main() {
 
     // Print a newline after the Brainfuck program output for readability
     println!();
-
-    // Tip: to inspect program execution without performing I/O, you can use:
-    // let mut bf = Brainfuck::new(">+.<".to_string());
-    // let _ = bf.run_debug(); // prints a step-by-step table
 }
