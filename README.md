@@ -1,6 +1,6 @@
 # rust-bf
 
-A tiny Brainfuck interpreter written in Rust, exposed as both a library and a simple CLI (bf_runner).
+A tiny Brainfuck interpreter written in Rust, exposed as both a library and a simple CLI (bf).
 
 - Memory tape defaults to 30,000 cells initialized to 0
 - Strict pointer bounds (moving left of 0 or beyond the last cell is an error)
@@ -19,21 +19,22 @@ You need Rust and Cargo installed.
 - Run tests: `cargo test`
 - Run example: `cargo run --example usage`
 
-## CLI usage (bf_runner)
+## CLI usage (read)
 
 The CLI concatenates all args into the Brainfuck program and runs it. It prints a trailing newline after execution.
 
 Examples:
 
 - Hello World
-  - `cargo run --bin bf_runner -- "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>."`
+  - `cargo run --bin bf -- read "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.
+  ------.--------.>+.>."`
 
 - Echo a single byte from stdin (",.")
-  - `printf 'Z' | cargo run --bin bf_runner -- ",."`
+  - `printf 'Z' | cargo run --bin bf -- read ",."`
   - Output: `Z` followed by a newline from the CLI
 
 - Debug mode (prints a table instead of executing I/O)
-  - `cargo run --bin bf_runner -- --debug ">+.<"`
+  - `cargo run --bin bf -- read --debug ">+.<"`
   - Useful for understanding control flow; `,` behaves as EOF (cell set to 0) and `.` output is suppressed
 
 Notes:
@@ -47,13 +48,13 @@ Generate Brainfuck code that prints the provided input.
 
 Examples:
 - From positional args (recommended with Cargo; note the `--` separator):
-  - `cargo run --bin write -- "Hello world"`
+  - `cargo run --bin bf -- write "Hello world"`
 - From STDIN (UTF-8 text):
-  - `echo -n 'Hello' | cargo run --bin write --`
+  - `echo -n 'Hello' | cargo run --bin bf -- write`
 - From a file:
-  - `cargo run --bin write -- --file ./message.txt`
+  - `cargo run --bin bf -- write --file ./message.txt`
 - Raw bytes from a file:
-  - `cargo run --bin write -- --bytes --file ./image.bin`
+  - `cargo run --bin bf -- write --bytes --file ./image.bin`
 
 The output is Brainfuck code printed to stdout (a trailing newline is added for readability).
 

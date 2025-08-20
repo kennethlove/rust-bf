@@ -3,6 +3,12 @@ name = "rust-bf"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "bf"
+path = "src/main.rs"
+
+# Keep existing bin targets in src/bin (read, write) for backward compatibility
+
 [dependencies]
 
 [dev-dependencies]

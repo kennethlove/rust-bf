@@ -3,10 +3,10 @@ use predicates::prelude::*;
 
 #[test]
 fn debug_flag_prints_table() {
-    let mut cmd = assert_cmd::Command::cargo_bin("bf_runner")
-        .expect("failed to locate bf_runner binary");
+    let mut cmd = assert_cmd::Command::cargo_bin("bf")
+        .expect("failed to locate bf binary");
 
-    cmd.args(["--debug", ">"]) // single instruction: move pointer right
+    cmd.args(["read", "--debug", ">"]) // single instruction: move pointer right
         .assert()
         .success()
         .stdout(predicates::str::contains("STEP | IP")
