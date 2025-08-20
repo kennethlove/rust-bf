@@ -15,7 +15,7 @@
 //! Quick start:
 //!
 //! ```no_run
-//! use lib::BrainfuckReader;
+//! use bf::BrainfuckReader;
 //!
 //! // Classic "Hello World!" in Brainfuck
 //! let code = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.";

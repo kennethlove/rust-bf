@@ -1,4 +1,4 @@
-use lib::BrainfuckReader;
+use bf::BrainfuckReader;
 
 fn main() {
     // Example: demonstrate debug mode (no real I/O; prints a step-by-step table)

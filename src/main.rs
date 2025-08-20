@@ -1,4 +1,5 @@
-use lib::{BrainfuckReader, BrainfuckWriter};
+use bf::{BrainfuckReader, BrainfuckWriter};
+use clap::{Args, Parser, Subcommand};
 use std::env;
 use std::fs;
 use std::io::{self, Read};
@@ -70,42 +71,85 @@ Notes:
     std::process::exit(code);
 }
 
-fn run_read<I>(program: &str, args: I) -> i32
-where
-    I: IntoIterator<Item = String>,
-{
-    let mut debug = false;
-    let mut code_parts: Vec<String> = Vec::new();
-    let mut file_path: Option<String> = None;
+#[derive(Parser, Debug)]
+#[command(name = "bf", disable_help_flag = true, disable_help_subcommand = true)]
+struct Cli {
+    /// Show this help
+    #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
+    help: bool,
 
-    let mut it = args.into_iter();
-    let mut saw_any = false;
-    while let Some(a) = it.next() {
-        saw_any = true;
-        match a.as_str() {
-            "--debug" | "-d" => debug = true,
-            "--help" | "-h" => return { read_usage_and_exit(program, 0) },
-            "--file" | "-f" => {
-                let Some(p) = it.next() else {
-                    eprintln!("{program}: --file requires a path");
-                    return { read_usage_and_exit(program, 2) };
-                };
-                file_path = Some(p);
-            }
-            other => code_parts.push(other.to_string()),
-        }
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    Read(ReadArgs),
+    Write(WriteArgs),
+}
+
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+struct ReadArgs {
+    /// Print a step-by-step table of operations instead of executing
+    #[arg(short = 'd', long = "debug")]
+    debug: bool,
+
+    /// Read Brainfuck code from PATH instead of positional "<code>"
+    #[arg(short = 'f', long = "file")]
+    file: Option<String>,
+
+    /// Concatenated Brainfuck code parts
+    #[arg(value_name = "code", trailing_var_arg = true)]
+    code: Vec<String>,
+
+    /// Show this help
+    #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
+    help: bool,
+}
+
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+struct WriteArgs {
+    /// Treat input as raw bytes (no UTF-8 required)
+    #[arg(long = "bytes")]
+    bytes: bool,
+
+    /// Read input from file at PATH (otherwise reads from TEXT or STDIN)
+    #[arg(short = 'f', long = "file")]
+    file: Option<String>,
+
+    /// Positional text (UTF-8). If omitted, reads from STDIN.
+    #[arg(value_name = "TEXT", trailing_var_arg = true)]
+    text: Vec<String>,
+
+    /// Show this help
+    #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
+    help: bool,
+}
+
+fn run_read_with_args(program: &str, args: ReadArgs) -> i32 {
+    if args.help {
+        read_usage_and_exit(program, 0);
     }
 
-    if !saw_any || (file_path.is_none() && code_parts.is_empty()) {
+    let ReadArgs {
+        debug,
+        file,
+        code,
+        ..
+    } = args;
+
+    if file.is_none() && code.is_empty() {
         read_usage_and_exit(program, 2);
     }
 
-    if file_path.is_some() && !code_parts.is_empty() {
+    if file.is_some() && !code.is_empty() {
         eprintln!("{program}: cannot use positional code together with --file");
-        return { read_usage_and_exit(program, 2) };
+        read_usage_and_exit(program, 2);
     }
 
-    let code = if let Some(path) = file_path {
+    let code_str = if let Some(path) = file {
         match fs::read_to_string(&path) {
             Ok(s) => s,
             Err(e) => {
@@ -114,10 +158,10 @@ where
             }
         }
     } else {
-        code_parts.join("")
+        code.join("")
     };
 
-    let mut bf = BrainfuckReader::new(code);
+    let mut bf = BrainfuckReader::new(code_str);
     let result = if debug { bf.run_debug() } else { bf.run() };
 
     if let Err(err) = result {
@@ -130,57 +174,26 @@ where
     0
 }
 
-fn run_write<I>(program: &str, mut args: I) -> i32
-where
-    I: Iterator<Item = String>,
-{
-    let mut show_help = false;
-    let mut use_bytes = false;
-    let mut file_path: Option<String> = None;
-    let mut text_parts: Vec<String> = Vec::new();
-
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--help" | "-h" => {
-                show_help = true;
-                break;
-            }
-            "--debug" | "-d" => {
-                eprintln!("{program}: 'write' does not support --debug/-d");
-                return { write_usage_and_exit(program, 2) };
-            }
-            "--bytes" => use_bytes = true,
-            "--file" | "-f" => {
-                let Some(p) = args.next() else {
-                    eprintln!("{program}: --file requires a path");
-                    return { write_usage_and_exit(program, 2) };
-                };
-                file_path = Some(p);
-            }
-            other => {
-                // If it looks like a flag, but we didn't recognize it, error out
-                if other.starts_with('-') {
-                    eprintln!("{program}: unknown flag '{other}' for 'write'");
-                    return { write_usage_and_exit(program, 2) };
-                }
-                text_parts.push(other.to_string());
-            }
-        }
+fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
+    if args.help {
+        write_usage_and_exit(program, 0);
     }
 
-    if show_help {
-        return { write_usage_and_exit(program, 0) };
-    }
+    let WriteArgs {
+        bytes,
+        file,
+        text,
+        ..
+    } = args;
 
-    if file_path.is_some() && !text_parts.is_empty() {
+    if file.is_some() && !text.is_empty() {
         eprintln!("{program}: cannot use positional TEXT together with --file");
-        return { write_usage_and_exit(program, 2) };
+        write_usage_and_exit(program, 2);
     }
 
-    // Acquire input bytes according to mode
-    let input_bytes: Vec<u8> = match file_path {
+    let input_bytes: Vec<u8> = match file {
         Some(path) => {
-            if use_bytes {
+            if bytes {
                 match fs::read(&path) {
                     Ok(b) => b,
                     Err(e) => {
@@ -201,9 +214,9 @@ where
             }
         }
         None => {
-            if !text_parts.is_empty() {
-                text_parts.join(" ").into_bytes()
-            } else if use_bytes {
+            if !text.is_empty() {
+                text.join(" ").into_bytes()
+            } else if bytes {
                 let mut buf = Vec::new();
                 if let Err(e) = io::stdin().lock().read_to_end(&mut buf) {
                     eprintln!("{program}: failed reading stdin: {e}");
@@ -237,22 +250,20 @@ where
 }
 
 fn main() {
-    let mut args = env::args();
-    let program = args
-        .next()
-        .unwrap_or_else(|| String::from("bf"));
+    // We still pull the program name for help rendering consistency
+    let program = env::args().next().unwrap_or_else(|| String::from("bf"));
 
-    let Some(subcmd) = args.next() else {
-        print_top_usage_and_exit(&program, 2);
-    };
+    let cli = Cli::parse();
 
-    let code = match subcmd.as_str() {
-        "read" => run_read(&program, args.map(|s| s)),
-        "write" => run_write(&program, args),
-        "--help" | "-h" => { print_top_usage_and_exit(&program, 0) },
-        other => {
-            eprintln!("{program}: unknown subcommand '{other}'");
-            print_top_usage_and_exit(&program, 2);
+    if cli.help || cli.command.is_none() {
+        print_top_usage_and_exit(&program, if cli.help { 0 } else { 2 });
+    }
+
+    let code = match cli.command.unwrap() {
+        Command::Read(args) => run_read_with_args(&program, args),
+        Command::Write(args) => {
+            // Explicitly error on debug for write if user passes it by mistake; clap won't accept it, but keep behavior
+            run_write_with_args(&program, args)
         }
     };
 

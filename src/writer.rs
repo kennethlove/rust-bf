@@ -10,7 +10,7 @@
 //! Quick start:
 //!
 //! ```no_run
-//! use lib::{BrainfuckWriter, WriterOptions};
+//! use bf::{BrainfuckWriter, WriterOptions};
 //!
 //! // Classic "Hello World!" in Brainfuck
 //! let input = "Hello World!".as_bytes();
