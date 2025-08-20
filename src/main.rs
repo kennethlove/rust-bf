@@ -2,7 +2,7 @@ use bf::{BrainfuckReader, BrainfuckWriter};
 use clap::{Args, Parser, Subcommand};
 use std::env;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, BufRead, Read, Write};
 
 fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
@@ -86,6 +86,7 @@ struct Cli {
 enum Command {
     Read(ReadArgs),
     Write(WriteArgs),
+    Repl(ReplArgs),
 }
 
 #[derive(Args, Debug)]
@@ -123,6 +124,14 @@ struct WriteArgs {
     #[arg(value_name = "TEXT", trailing_var_arg = true)]
     text: Vec<String>,
 
+    /// Show this help
+    #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
+    help: bool,
+}
+
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+struct ReplArgs {
     /// Show this help
     #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
     help: bool,
@@ -249,6 +258,76 @@ fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
     }
 }
 
+/// Executes a single Brainfuck program contained in `buffer`.
+/// - Program output goes to stdout.
+/// - Errors are printed concisely to stderr.
+/// - A newline is always written to stdout after execution (success or error)
+///   so that the prompt begins at column 0 on the next iteration.
+fn execute_bf_buffer(buffer: String) {
+    // Create a reader and run the program
+    let mut bf = BrainfuckReader::new(buffer.to_string());
+    if let Err(err) = bf.run() {
+        eprintln!("Error: {:?}", err);
+    }
+    println!();
+    let _ = io::stdout().flush(); // Ensure output is flushed
+}
+
+fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
+    if args.help {
+        read_usage_and_exit(program, 0);
+    }
+
+    repl_loop().unwrap();
+    0
+}
+
+fn repl_loop() -> io::Result<()> {
+    loop {
+        let mut stdin = io::stdin().lock();
+
+        // Read a line of Brainfuck code from stdin
+        print!("> ");
+        io::stdout().flush()?;
+
+        let submission = read_submission(&mut stdin);
+        if submission.is_none() {
+            // EOF or empty input, exit the loop
+            continue;
+        }
+        let submission = submission.unwrap();
+
+        let trimmed = submission.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let filtered: String = trimmed
+            .chars()
+            .filter(|c| matches!(c, '>' | '<' | '+' | '-' | '.' | ',' | '[' | ']'))
+            .collect();
+
+        if filtered.is_empty() {
+            continue;
+        }
+
+        // Execute the Brainfuck code in the line
+        execute_bf_buffer(filtered);
+    }
+}
+
+fn read_submission(stdin: &mut io::StdinLock) -> Option<String> {
+    let mut line = String::new();
+    if stdin.read_line(&mut line).is_ok() {
+        if line.is_empty() {
+            return None; // EOF or empty line
+        }
+        Some(line)
+    } else {
+        None // Read error
+    }
+}
+
 fn main() {
     // We still pull the program name for help rendering consistency
     let program = env::args().next().unwrap_or_else(|| String::from("bf"));
@@ -261,10 +340,8 @@ fn main() {
 
     let code = match cli.command.unwrap() {
         Command::Read(args) => run_read_with_args(&program, args),
-        Command::Write(args) => {
-            // Explicitly error on debug for write if user passes it by mistake; clap won't accept it, but keep behavior
-            run_write_with_args(&program, args)
-        }
+        Command::Write(args) =>  run_write_with_args(&program, args),
+        Command::Repl(args) => run_repl_with_args(&program, args),
     };
 
     std::process::exit(code);

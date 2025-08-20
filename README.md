@@ -58,6 +58,17 @@ Examples:
 
 The output is Brainfuck code printed to stdout (a trailing newline is added for readability).
 
+## CLI usage (REPL)
+
+Interactive REPL for Brainfuck code execution.
+
+- Start the REPL:
+  - `cargo run --bin bf -- repl`
+- Type Brainfuck code directly into the REPL.
+- Press Ctrl-D (Unix/macOS) or Ctrl-Z (Windows) to signal EOF and execute the code.
+- The REPL will print the output of the Brainfuck program.
+- Press Ctrl-C to exit the REPL immediately with exit code 0.
+
 ## Library usage
 
 Add this crate to your workspace or use it via a path dependency. Then:

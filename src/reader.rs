@@ -25,15 +25,22 @@
 //! ```
 
 /// Errors that can occur while interpreting Brainfuck code.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BrainfuckReaderError {
     /// The data pointer attempted to move left of cell 0 or beyond the last cell.
+    #[error("Pointer out of bounds")]
     PointerOutOfBounds,
+    
     /// Encountered a character outside the Brainfuck instruction set `><+-.,[]`.
-    InvalidCharacter,
+    #[error("Invalid character: '{0}'")]
+    InvalidCharacter(char),
+    
     /// Loops were not balanced; a matching `[` or `]` was not found.
+    #[error("Unmatched brackets: a loop was not properly closed")]
     UnmatchedBrackets,
+    
     /// An underlying I/O error occurred when reading from stdin.
+    #[error("I/O error: {0}")]
     IoError(std::io::Error),
 }
 
@@ -185,7 +192,7 @@ impl BrainfuckReader {
                     }
                 }
                 _ => {
-                    return Err(BrainfuckReaderError::InvalidCharacter);
+                    return Err(BrainfuckReaderError::InvalidCharacter(instr));
                 }
             }
 
@@ -224,7 +231,12 @@ impl BrainfuckReader {
     pub fn run_debug(&mut self) -> Result<(), BrainfuckReaderError> {
         self.execute(true)
     }
+    
+    pub fn run_repl(&mut self, stdin: &mut std::io::StdinLock, stdout: &mut std::io::StdoutLock) -> Result<(), BrainfuckReaderError> {
+        self.execute(false)
+    }
 }
+
 
 
 #[cfg(test)]
@@ -235,7 +247,7 @@ mod tests {
     fn invalid_character_returns_error() {
         let mut bf = BrainfuckReader::new_with_memory("+a+".to_string(), 10);
         let result = bf.run();
-        assert!(matches!(result, Err(BrainfuckReaderError::InvalidCharacter)));
+        assert!(matches!(result, Err(BrainfuckReaderError::InvalidCharacter('a'))));
     }
 
     #[test]
