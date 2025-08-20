@@ -277,6 +277,9 @@ fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
     if args.help {
         read_usage_and_exit(program, 0);
     }
+    
+    println!("Brainfuck REPL");
+    println!("Press ctrl+c to exit");
 
     repl_loop().unwrap();
     0
