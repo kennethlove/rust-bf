@@ -346,10 +346,10 @@ fn repl_loop() -> io::Result<()> {
 
         let submission = read_submission(&mut stdin);
         if submission.is_none() {
-            // EOF or empty input
+            // EOF or empty input: end the session cleanly to avoid hanging when stdin is closed
             println!();
             io::stdout().flush()?;
-            continue;
+            return Ok(());
         }
         let submission = submission.unwrap();
 
@@ -495,14 +495,18 @@ fn main() {
 
     let cli = Cli::parse();
 
-    if cli.help || cli.command.is_none() {
-        print_top_usage_and_exit(&program, if cli.help { 0 } else { 2 });
+    if cli.help {
+        print_top_usage_and_exit(&program, 0);
     }
 
-    let code = match cli.command.unwrap() {
-        Command::Read(args) => run_read_with_args(&program, args),
-        Command::Write(args) =>  run_write_with_args(&program, args),
-        Command::Repl(args) => run_repl_with_args(&program, args),
+    let code = match cli.command {
+        Some(Command::Read(args)) => run_read_with_args(&program, args),
+        Some(Command::Write(args)) =>  run_write_with_args(&program, args),
+        Some(Command::Repl(args)) => run_repl_with_args(&program, args),
+        None => {
+            // Default to REPL when no subcommand is provided
+            run_repl_with_args(&program, ReplArgs { help: false })
+        }
     };
 
     std::process::exit(code);
