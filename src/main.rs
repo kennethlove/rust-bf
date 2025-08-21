@@ -16,6 +16,7 @@ Run "{0} <subcommand> --help" for more info.
 "#,
         program
     );
+    let _ = io::stderr().flush();
     std::process::exit(code);
 }
 
@@ -42,6 +43,7 @@ Examples:
 "#,
         program
     );
+    let _ = io::stderr().flush();
     std::process::exit(code);
 }
 
@@ -68,6 +70,7 @@ Notes:
 "#,
         program
     );
+    let _ = io::stderr().flush();
     std::process::exit(code);
 }
 
@@ -163,6 +166,7 @@ fn run_read_with_args(program: &str, args: ReadArgs) -> i32 {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("{program}: failed to read code file as UTF-8: {e}");
+                let _ = io::stderr().flush();
                 return 1;
             }
         }
@@ -175,11 +179,13 @@ fn run_read_with_args(program: &str, args: ReadArgs) -> i32 {
 
     if let Err(err) = result {
         eprintln!("{program}: Brainfuck interpreter error: {:?}", err);
+        let _ = std::io::stderr().flush();
         return 1;
     }
 
     // For readability, ensure output ends with a newline
     println!();
+    let _ = io::stdout().flush();
     0
 }
 
@@ -207,6 +213,7 @@ fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
                     Ok(b) => b,
                     Err(e) => {
                         eprintln!("{program}: failed to read file: {e}");
+                        let _ = io::stderr().flush();
                         return 1;
                     }
                 }
@@ -217,6 +224,7 @@ fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
                         eprintln!(
                             "{program}: failed to read file as UTF-8 (use --bytes for binary): {e}"
                         );
+                        let _ = io::stderr().flush();
                         return 1;
                     }
                 }
@@ -229,6 +237,7 @@ fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
                 let mut buf = Vec::new();
                 if let Err(e) = io::stdin().lock().read_to_end(&mut buf) {
                     eprintln!("{program}: failed reading stdin: {e}");
+                    let _ = io::stderr().flush();
                     return 1;
                 }
                 buf
@@ -238,6 +247,7 @@ fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
                     eprintln!(
                         "{program}: failed reading UTF-8 from stdin (use --bytes for binary): {e}"
                     );
+                    let _ = io::stderr().flush();
                     return 1;
                 }
                 s.into_bytes()
@@ -249,10 +259,12 @@ fn run_write_with_args(program: &str, args: WriteArgs) -> i32 {
     match writer.generate() {
         Ok(code) => {
             println!("{}", code);
+            let _ = io::stdout().flush();
             0
         }
         Err(err) => {
             eprintln!("{program}: error generating Brainfuck: {:?}", err);
+            let _ = io::stderr().flush();
             1
         }
     }
@@ -268,6 +280,7 @@ fn execute_bf_buffer(buffer: String) {
     let mut bf = BrainfuckReader::new(buffer.to_string());
     if let Err(err) = bf.run() {
         eprintln!("Error: {:?}", err);
+        let _ = io::stderr().flush();
     }
     println!();
     let _ = io::stdout().flush(); // Ensure output is flushed
@@ -277,14 +290,15 @@ fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
     if args.help {
         read_usage_and_exit(program, 0);
     }
-    
+
     // Install SIGINT (ctrl+c) handler to flush and exit(0) immediately
     if let Err(e) = ctrlc::set_handler(|| {
         let _ = std::io::stdout().flush();
-        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
         std::process::exit(0);
     }) {
         eprintln!("{program}: failed to set ctrl+c handler: {e}");
+        let _ = std::io::stderr().flush();
         return 1;
     }
 
