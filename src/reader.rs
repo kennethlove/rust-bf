@@ -24,17 +24,42 @@
 //! println!(); // ensure a trailing newline for readability
 //! ```
 
+use std::fmt;
+
 /// Errors that can occur while interpreting Brainfuck code.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum BrainfuckReaderError {
     /// The data pointer attempted to move left of cell 0 or beyond the last cell.
-    PointerOutOfBounds,
+    #[error("Pointer out of bounds at instruction {ip} (ptr={ptr}, op='{op}')")]
+    PointerOutOfBounds { ip: usize, ptr: usize, op: char },
+    
     /// Encountered a character outside the Brainfuck instruction set `><+-.,[]`.
-    InvalidCharacter,
+    #[error("Invalid character: '{ch}' at instruction {ip}")]
+    InvalidCharacter { ch: char, ip: usize },
+    
     /// Loops were not balanced; a matching `[` or `]` was not found.
-    UnmatchedBrackets,
+    #[error("Unmatched bracket {kind} at instruction {ip}")]
+    UnmatchedBrackets{ ip: usize, kind: UnmatchedBracketKind },
+    
     /// An underlying I/O error occurred when reading from stdin.
-    IoError(std::io::Error),
+    #[error("I/O error at instruction {ip}: {source}")]
+    IoError { ip: usize, #[source] source: std::io::Error },
+}
+
+/// Which side of the loop was unmatched.
+#[derive(Debug, Clone, Copy)]
+pub enum UnmatchedBracketKind {
+    Open,
+    Close,
+}
+
+impl fmt::Display for UnmatchedBracketKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UnmatchedBracketKind::Open => write!(f, "'['"),
+            UnmatchedBracketKind::Close => write!(f, "']'"),
+        }
+    }
 }
 
 /// A simple Brainfuck interpreter.
@@ -87,15 +112,21 @@ impl BrainfuckReader {
                     stack.push(i);
                 } else if c == ']' {
                     let Some(open_index) = stack.pop() else {
-                        return Err(BrainfuckReaderError::UnmatchedBrackets);
+                        return Err(BrainfuckReaderError::UnmatchedBrackets {
+                            ip: i,
+                            kind: UnmatchedBracketKind::Close,
+                        });
                     };
                     jump_map[open_index] = Some(i);
                     jump_map[i] = Some(open_index);
                 }
             }
 
-            if !stack.is_empty() {
-                return Err(BrainfuckReaderError::UnmatchedBrackets);
+            if let Some(unmatched_open) = stack.last().copied() {
+                return Err(BrainfuckReaderError::UnmatchedBrackets {
+                    ip: unmatched_open,
+                    kind: UnmatchedBracketKind::Open,
+                })
             }
         }
 
@@ -113,14 +144,22 @@ impl BrainfuckReader {
             match instr {
                 '>' => {
                     if self.pointer >= self.memory.len() - 1 {
-                        return Err(BrainfuckReaderError::PointerOutOfBounds);
+                        return Err(BrainfuckReaderError::PointerOutOfBounds {
+                            ip: code_ptr,
+                            ptr: self.pointer,
+                            op: instr,
+                        });
                     }
                     self.pointer += 1;
                     if let Some(a) = action.as_mut() { *a = format!("Moved pointer head to index {}", self.pointer); }
                 }
                 '<' => {
                     if self.pointer == 0 {
-                        return Err(BrainfuckReaderError::PointerOutOfBounds);
+                        return Err(BrainfuckReaderError::PointerOutOfBounds {
+                        ip: code_ptr,
+                            ptr: self.pointer,
+                            op: instr,
+                        });
                     }
                     self.pointer -= 1;
                     if let Some(a) = action.as_mut() { *a = format!("Moved pointer head to index {}", self.pointer); }
@@ -160,7 +199,7 @@ impl BrainfuckReader {
                                 self.memory[self.pointer] = buf[0];
                             }
                             Err(e) => {
-                                return Err(BrainfuckReaderError::IoError(e));
+                                return Err(BrainfuckReaderError::IoError { ip: code_ptr, source: e });
                             }
                         }
                         if let Some(a) = action.as_mut() { *a = format!("Read byte from stdin -> {}", self.memory[self.pointer]); }
@@ -185,7 +224,7 @@ impl BrainfuckReader {
                     }
                 }
                 _ => {
-                    return Err(BrainfuckReaderError::InvalidCharacter);
+                    return Err(BrainfuckReaderError::InvalidCharacter { ch: instr, ip: code_ptr });
                 }
             }
 
@@ -227,6 +266,7 @@ impl BrainfuckReader {
 }
 
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,7 +275,7 @@ mod tests {
     fn invalid_character_returns_error() {
         let mut bf = BrainfuckReader::new_with_memory("+a+".to_string(), 10);
         let result = bf.run();
-        assert!(matches!(result, Err(BrainfuckReaderError::InvalidCharacter)));
+        assert!(matches!(result, Err(BrainfuckReaderError::InvalidCharacter { ch: 'a', .. })));
     }
 
     #[test]
@@ -243,14 +283,14 @@ mod tests {
         // The starting cell is zero, so encountering '[' with no matching ']' should error.
         let mut bf = BrainfuckReader::new_with_memory("[+".to_string(), 10);
         let result = bf.run();
-        assert!(matches!(result, Err(BrainfuckReaderError::UnmatchedBrackets)));
+        assert!(matches!(result, Err(BrainfuckReaderError::UnmatchedBrackets { kind: UnmatchedBracketKind::Open, .. })));
     }
 
     #[test]
     fn left_pointer_out_of_bounds_errors() {
         let mut bf = BrainfuckReader::new_with_memory("<".to_string(), 10);
         let result = bf.run();
-        assert!(matches!(result, Err(BrainfuckReaderError::PointerOutOfBounds)));
+        assert!(matches!(result, Err(BrainfuckReaderError::PointerOutOfBounds { op: '<', .. })));
     }
 
     #[test]
@@ -260,7 +300,7 @@ mod tests {
         let code = ">".repeat(memory_size);
         let mut bf = BrainfuckReader::new_with_memory(code, memory_size);
         let result = bf.run();
-        assert!(matches!(result, Err(BrainfuckReaderError::PointerOutOfBounds)));
+        assert!(matches!(result, Err(BrainfuckReaderError::PointerOutOfBounds { op: '>', .. })));
     }
 
     #[test]
