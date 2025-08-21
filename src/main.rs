@@ -2,7 +2,7 @@ use bf::{BrainfuckReader, BrainfuckWriter};
 use clap::{Args, Parser, Subcommand};
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{self, Read, Write};
 
 fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
@@ -382,14 +382,14 @@ mod tests {
     fn read_submission_reads_until_eof_multiple_lines() {
         let input = b"+++\n>+.\n";
         let mut cursor = Cursor::new(&input[..]);
-        let got = super::read_submission(&mut cursor);
+        let got = read_submission(&mut cursor);
         assert_eq!(got.as_deref(), Some("+++\n>+.\n"));
     }
 
     #[test]
     fn read_submission_empty_returns_none() {
         let mut cursor = Cursor::new(Vec::<u8>::new());
-        let got = super::read_submission(&mut cursor);
+        let got = read_submission(&mut cursor);
         assert!(got.is_none());
     }
 }
