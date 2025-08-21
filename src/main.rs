@@ -277,6 +277,16 @@ fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
     if args.help {
         read_usage_and_exit(program, 0);
     }
+    
+    // Install SIGINT (ctrl+c) handler to flush and exit(0) immediately
+    if let Err(e) = ctrlc::set_handler(|| {
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stdout().flush();
+        std::process::exit(0);
+    }) {
+        eprintln!("{program}: failed to set ctrl+c handler: {e}");
+        return 1;
+    }
 
     println!("Brainfuck REPL");
     println!("Ctrl+d executes the current buffer. Press ctrl+c to exit");
