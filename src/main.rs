@@ -277,9 +277,9 @@ fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
     if args.help {
         read_usage_and_exit(program, 0);
     }
-    
+
     println!("Brainfuck REPL");
-    println!("Press ctrl+c to exit");
+    println!("Ctrl+d executes the current buffer. Press ctrl+c to exit");
 
     repl_loop().unwrap();
     0
@@ -295,7 +295,9 @@ fn repl_loop() -> io::Result<()> {
 
         let submission = read_submission(&mut stdin);
         if submission.is_none() {
-            // EOF or empty input, exit the loop
+            // EOF or empty input
+            println!();
+            io::stdout().flush()?;
             continue;
         }
         let submission = submission.unwrap();
@@ -316,13 +318,18 @@ fn repl_loop() -> io::Result<()> {
 
         // Execute the Brainfuck code in the line
         execute_bf_buffer(filtered);
+
+        // Test hook: if BF_REPL_ONCE is set, exit after single execution to allow integration testing
+        if std::env::var("BF_REPL_ONCE").ok().as_deref() == Some("1") {
+            return Ok(());
+        }
     }
 }
 
-fn read_submission(stdin: &mut io::StdinLock) -> Option<String> {
+fn read_submission<R: io::BufRead>(stdin: &mut R) -> Option<String> {
     // Collect all lines until EOF
     let mut buffer = String::new();
-    
+
     loop {
         let mut line = String::new();
         match stdin.read_line(&mut line) {
@@ -339,7 +346,7 @@ fn read_submission(stdin: &mut io::StdinLock) -> Option<String> {
             }
         }
     }
-    
+
     if buffer.is_empty() {
         None
     } else {
@@ -364,4 +371,25 @@ fn main() {
     };
 
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn read_submission_reads_until_eof_multiple_lines() {
+        let input = b"+++\n>+.\n";
+        let mut cursor = Cursor::new(&input[..]);
+        let got = super::read_submission(&mut cursor);
+        assert_eq!(got.as_deref(), Some("+++\n>+.\n"));
+    }
+
+    #[test]
+    fn read_submission_empty_returns_none() {
+        let mut cursor = Cursor::new(Vec::<u8>::new());
+        let got = super::read_submission(&mut cursor);
+        assert!(got.is_none());
+    }
 }

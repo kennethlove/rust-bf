@@ -231,10 +231,6 @@ impl BrainfuckReader {
     pub fn run_debug(&mut self) -> Result<(), BrainfuckReaderError> {
         self.execute(true)
     }
-    
-    pub fn run_repl(&mut self, stdin: &mut std::io::StdinLock, stdout: &mut std::io::StdoutLock) -> Result<(), BrainfuckReaderError> {
-        self.execute(false)
-    }
 }
 
 
