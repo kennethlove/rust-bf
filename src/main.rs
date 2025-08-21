@@ -7,10 +7,11 @@ use std::io::{self, Read, Write};
 fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
         r#"Usage:
-  {0} read  [--debug|-d] "<code>"     # Run Brainfuck code (args are concatenated)
+  {0} read  [--debug|-d] "<code>"      # Run Brainfuck code (args are concatenated)
   {0} read  [--debug|-d] --file <PATH> # Run Brainfuck code loaded from file
   {0} write [--bytes] [TEXT...]        # Generate Brainfuck to print TEXT/STDIN/file
-  {0} write [--bytes] --file <PATH>
+  {0} write [--bytes] --file <PATH>    # Generate Brainfuck to print file contents
+  {0} repl                             # Start a Brainfuck REPL (read-eval-print loop)
 
 Run "{0} <subcommand> --help" for more info.
 "#,
@@ -67,6 +68,31 @@ Input modes:
 
 Notes:
   - Output is Brainfuck code printed to stdout followed by a newline.
+"#,
+        program
+    );
+    let _ = io::stderr().flush();
+    std::process::exit(code);
+}
+
+fn repl_usage_and_exit(program: &str, code: i32) -> ! {
+    eprintln!(
+        r#"Usage:
+  {0} repl   # Start a Brainfuck REPL (read-eval-print loop)
+
+Options:
+  --help,   -h        Show this help
+
+Description:
+  Starts a REPL where you can enter Brainfuck code and execute it live.
+  
+Notes:
+    - Ctrl+d executes the current buffer on *nix/macOS.
+    - Ctrl+z and Enter will execute the current buffer on Windows.
+    - Ctrl+c exits the REPL immediately.
+    - The REPL will print a newline after each execution for readability.
+    - Each execution starts with a fresh memory and pointer.
+    - The REPL will exit after a single execution if the environment variable `BF_REPL_ONCE` is set to `1`.
 "#,
         program
     );
@@ -288,7 +314,7 @@ fn execute_bf_buffer(buffer: String) {
 
 fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
     if args.help {
-        read_usage_and_exit(program, 0);
+        repl_usage_and_exit(program, 0);
     }
 
     // Install SIGINT (ctrl+c) handler to flush and exit(0) immediately
@@ -303,7 +329,7 @@ fn run_repl_with_args(program: &str, args: ReplArgs) -> i32 {
     }
 
     println!("Brainfuck REPL");
-    println!("Ctrl+d executes the current buffer. Press ctrl+c to exit");
+    println!("Ctrl+d/Ctrl+z Enter (Windows) executes the current buffer. Press ctrl+c to exit");
 
     repl_loop().unwrap();
     0
