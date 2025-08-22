@@ -71,6 +71,20 @@ Interactive REPL for Brainfuck code execution.
 - The REPL will print the output of the Brainfuck program.
 - Press Ctrl-C to exit the REPL immediately with exit code 0.
 
+CLI features:
+
+- Multi-line buffer editing
+- Non-blocking execution
+  - Configurable with flags
+  - Default timeout: XXXX seconds, default max steps: YYYY
+- Command history (up/down arrows on a blank buffer)
+- Meta-commands (start with `:`):
+    - `:help` - show help
+    - `:exit` - exit the REPL
+    - `:reset` - clear the current buffer
+    - `:dump` - print the current buffer
+        - add `-n` option to print line numbers
+
 ## Library usage
 
 Add this crate to your workspace or use it via a path dependency. Then:
