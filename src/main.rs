@@ -32,9 +32,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Read(bf::read::ReadArgs),
-    Write(bf::write::WriteArgs),
-    Repl(bf::repl::ReplArgs),
+    Read(bf::commands::read::ReadArgs),
+    Write(bf::commands::write::WriteArgs),
+    Repl(bf::commands::repl::ReplArgs),
 }
 
 fn main() {
@@ -48,8 +48,8 @@ fn main() {
     }
 
     let code = match cli.command {
-        Some(Command::Read(args)) => bf::read::run(&program, args),
-        Some(Command::Write(args)) => bf::write::run(&program, args),
+        Some(Command::Read(args)) => bf::commands::read::run(&program, args),
+        Some(Command::Write(args)) => bf::commands::write::run(&program, args),
         Some(Command::Repl(args)) => {
             let program = "repl";
             let mode_flag = if args.bare {
@@ -60,12 +60,12 @@ fn main() {
                 bf::repl::ModeFlagOverride::None
             };
             
-            let code = bf::repl::run(&program, false, mode_flag);
+            let code = bf::commands::repl::run(&program, false, mode_flag);
             std::process::exit(code);
         },
         None => {
             // Default to REPL when no subcommand is provided
-            bf::repl::run(&program, false, bf::repl::ModeFlagOverride::None)
+            bf::commands::repl::run(&program, false, bf::repl::ModeFlagOverride::None)
         }
     };
 

@@ -1,8 +1,7 @@
 mod cli_util;
-pub mod read;
+pub mod commands;
 mod reader;
 pub mod repl;
-pub mod write;
 mod writer;
 
 pub use reader::{BrainfuckReader, BrainfuckReaderError, UnmatchedBracketKind};

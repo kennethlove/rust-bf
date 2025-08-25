@@ -56,7 +56,7 @@ Goal: Provide predictable behavior for humans (interactive editor) and tooling/p
 - Behavior details:
     - Bare mode:
         - No line editor or history; single submission read until EOF; execute once; exit 0.
-        - No syntax highlighting needed.
+        - No syntax highlighting is needed.
         - Stream policy unchanged: program output to stdout; meta/errors to stderr.
     - Interactive mode:
         - Multiline editing with Enter inserting newline; EOF (e.g., Ctrl-D) submits.
