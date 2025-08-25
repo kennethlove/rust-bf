@@ -1,5 +1,5 @@
-use bf::BrainfuckReaderError;
 use std::io::{self, Write};
+use crate::BrainfuckReaderError;
 
 /// Pretty-print structured BrainfuckReaderError with caret positioning.
 /// If `program` is `Some("bf")`, prefix messages with "bf: ..." for CLI read mode

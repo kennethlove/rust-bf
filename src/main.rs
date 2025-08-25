@@ -1,7 +1,3 @@
-mod repl;
-mod read;
-mod write;
-mod cli_util;
 use clap::{Args, Parser, Subcommand};
 use std::env;
 use std::io::{self, Write};
@@ -36,17 +32,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Read(read::ReadArgs),
-    Write(write::WriteArgs),
-    Repl(ReplArgs),
-}
-
-#[derive(Args, Debug)]
-#[command(disable_help_flag = true)]
-struct ReplArgs {
-    /// Show this help
-    #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
-    help: bool,
+    Read(bf::read::ReadArgs),
+    Write(bf::write::WriteArgs),
+    Repl(bf::repl::ReplArgs),
 }
 
 fn main() {
@@ -54,18 +42,30 @@ fn main() {
     let program = env::args().next().unwrap_or_else(|| String::from("bf"));
 
     let cli = Cli::parse();
-
+    
     if cli.help {
         print_top_usage_and_exit(&program, 0);
     }
 
     let code = match cli.command {
-        Some(Command::Read(args)) => read::run(&program, args),
-        Some(Command::Write(args)) => write::run(&program, args),
-        Some(Command::Repl(args)) => repl::run(&program, args.help),
+        Some(Command::Read(args)) => bf::read::run(&program, args),
+        Some(Command::Write(args)) => bf::write::run(&program, args),
+        Some(Command::Repl(args)) => {
+            let program = "repl";
+            let mode_flag = if args.bare {
+                bf::repl::ModeFlagOverride::Bare
+            } else if args.editor {
+                bf::repl::ModeFlagOverride::Editor
+            } else {
+                bf::repl::ModeFlagOverride::None
+            };
+            
+            let code = bf::repl::run(&program, false, mode_flag);
+            std::process::exit(code);
+        },
         None => {
             // Default to REPL when no subcommand is provided
-            repl::run(&program, false)
+            bf::repl::run(&program, false, bf::repl::ModeFlagOverride::None)
         }
     };
 

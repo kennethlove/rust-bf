@@ -1,7 +1,7 @@
-use bf::BrainfuckReader;
 use clap::Args;
 use std::fs;
 use std::io::{self, Write};
+use crate::BrainfuckReader;
 use crate::cli_util::print_reader_error;
 
 #[derive(Args, Debug)]

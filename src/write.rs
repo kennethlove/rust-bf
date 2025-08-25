@@ -1,7 +1,8 @@
-use bf::BrainfuckWriter;
 use clap::Args;
 use std::fs;
 use std::io::{self, Read, Write};
+
+use crate::BrainfuckWriter;
 
 #[derive(Args, Debug)]
 #[command(disable_help_flag = true)]
