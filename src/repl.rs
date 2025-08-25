@@ -9,11 +9,11 @@ use crate::{cli_util, BrainfuckReader};
 #[command(disable_help_flag = true)]
 pub struct ReplArgs {
     /// Force non-interactive bare mode
-    #[arg(long = "bare")]
+    #[arg(long = "bare", conflicts_with = "editor")]
     pub bare: bool,
 
     /// Force interactive mode (errors if stdin is not a TTY)
-    #[arg(long = "editor")]
+    #[arg(long = "editor", conflicts_with = "bare")]
     pub editor: bool,
 
     /// Show this help
