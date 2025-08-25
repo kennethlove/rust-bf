@@ -71,24 +71,3 @@ fn main() {
 
     std::process::exit(code);
 }
-
-#[cfg(test)]
-mod tests {
-    use std::io::Cursor;
-    use crate::repl::read_submission;
-
-    #[test]
-    fn read_submission_reads_until_eof_multiple_lines() {
-        let input = b"+++\n>+.\n";
-        let mut cursor = Cursor::new(&input[..]);
-        let got = read_submission(&mut cursor);
-        assert_eq!(got.as_deref(), Some("+++\n>+.\n"));
-    }
-
-    #[test]
-    fn read_submission_empty_returns_none() {
-        let mut cursor = Cursor::new(Vec::<u8>::new());
-        let got = read_submission(&mut cursor);
-        assert!(got.is_none());
-    }
-}

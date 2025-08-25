@@ -1,6 +1,7 @@
 use bf::BrainfuckReader;
 use std::env;
 use std::io::{self, Write};
+use reedline::DefaultPromptSegment;
 use crate::cli_util::print_reader_error;
 
 // Public entry point for the REPL from main.rs
@@ -57,29 +58,27 @@ Notes:
 }
 
 fn repl_loop() -> io::Result<()> {
+    // Initialize interactive line editor
+    let mut editor = init_line_editor()?;
+
     loop {
-        let mut stdin = io::stdin().lock();
-
-        // Prompt
-        print!("bf> ");
-        io::stdout().flush()?;
-
-        let submission = read_submission(&mut stdin);
+        // Prompt and read a multi-line submission via editor
+        let submission = read_submission_interactive(&mut editor)?;
         if submission.is_none() {
-            // EOF or empty input: end the session cleanly to avoid hanging when stdin is closed
+            // EOF or editor closed. End the session cleanly to avoid hanging when stdin is closed
             println!();
             io::stdout().flush()?;
             return Ok(());
         }
+
         let submission = submission.unwrap();
 
         let trimmed = submission.trim();
         if trimmed.is_empty() {
-            continue;
+            continue; // Ignore empty submissions
         }
 
         let filtered = bf_only(&trimmed);
-
         if filtered.is_empty() {
             continue;
         }
@@ -87,11 +86,34 @@ fn repl_loop() -> io::Result<()> {
         // Execute the Brainfuck code buffer
         execute_bf_buffer(filtered);
 
-        // Test hook: if BF_REPL_ONCE is set, exit after single execution to allow integration testing
+        // Test hook: if BF_REPL_ONCE=1, exit after one execution
         if env::var("BF_REPL_ONCE").ok().as_deref() == Some("1") {
             return Ok(());
         }
     }
+}
+
+fn init_line_editor() -> io::Result<reedline::Reedline> {
+    use reedline::{
+        default_emacs_keybindings, EditCommand, Emacs, KeyCode, KeyModifiers, Reedline, ReedlineEvent,
+    };
+
+    // Start from default emacs-like bindings and adjust:
+    // - Enter -> InsertNewLine (do not submit)
+    // - Ctrl+D -> AcceptLine (submit)
+    // - Ctrl+Z -> AcceptLine (submit, for Windows)
+    let mut keybindings = default_emacs_keybindings();
+    keybindings.add_binding(KeyModifiers::NONE, KeyCode::Enter, ReedlineEvent::Edit(vec![EditCommand::InsertNewline]));
+    keybindings.add_binding(KeyModifiers::CONTROL, KeyCode::Char('d'), ReedlineEvent::Submit);
+    keybindings.add_binding(KeyModifiers::CONTROL, KeyCode::Char('z'), ReedlineEvent::Submit);
+
+    let history = reedline::FileBackedHistory::new(1_000).unwrap();
+
+    let editor = Reedline::create()
+        .with_history(Box::new(history))
+        .with_edit_mode(Box::new(Emacs::new(keybindings)));
+
+    Ok(editor)
 }
 
 pub fn read_submission<R: io::BufRead>(stdin: &mut R) -> Option<String> {
@@ -122,6 +144,36 @@ pub fn read_submission<R: io::BufRead>(stdin: &mut R) -> Option<String> {
     }
 }
 
+fn read_submission_interactive(editor: &mut reedline::Reedline) -> io::Result<Option<String>> {
+    use reedline::{Signal, DefaultPrompt, HistoryItem};
+
+    // Minimal prompt
+    let prompt = DefaultPrompt::new(DefaultPromptSegment::Basic("bf".to_string()), DefaultPromptSegment::Empty);
+
+    // Render prompt and read until user submits with Ctrl+D or Ctrl+Z
+    // Enter inserts a newline; history is in-memory and not browsed
+    let res = editor.read_line(&prompt);
+
+    match res {
+        Ok(Signal::Success(buffer)) => {
+            // Add one history item per submitted buffer (program-level)
+            if !buffer.trim().is_empty() {
+                let _ = editor.history_mut().save(HistoryItem::from_command_line(buffer.clone()));
+            }
+            Ok(Some(buffer))
+        }
+        Ok(Signal::CtrlC) => Ok(None), // Global SIGINT, exit immediately
+        Ok(Signal::CtrlD) => Ok(None), // EOF, exit cleanly
+        Err(e) => {
+            // Print concise error and end session
+            eprintln!("repl: editor error: {e}");
+            let _ = io::stderr().flush();
+            Ok(None)
+        }
+    }
+
+}
+
 /// Keep only Brainfuck instruction characters
 fn bf_only(s: &str) -> String {
     s.chars()
@@ -143,6 +195,7 @@ fn execute_bf_buffer(buffer: String) {
     println!();
     let _ = io::stdout().flush(); // Ensure output is flushed
 }
+
 
 
 #[cfg(test)]
