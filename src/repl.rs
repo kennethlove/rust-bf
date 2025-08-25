@@ -1,7 +1,7 @@
 use std::env;
 use std::io::{self, IsTerminal, Write};
 use reedline::{Signal, DefaultPrompt, DefaultPromptSegment, HistoryItem, Highlighter, StyledText};
-use nu_ansi_term::{Color, Style};
+use nu_ansi_term::Style;
 
 use crate::{cli_util, BrainfuckReader};
 
@@ -58,7 +58,7 @@ fn init_line_editor() -> io::Result<reedline::Reedline> {
     let history = reedline::FileBackedHistory::new(1_000).unwrap();
 
     let editor = Reedline::create()
-        .with_highlighter(Box::new(BrainfuckHighlighter::default()))
+        .with_highlighter(Box::new(BrainfuckHighlighter::new_catppuccin_mocha()))
         .with_history(Box::new(history))
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
 
@@ -208,45 +208,87 @@ pub fn execute_bare_once() -> io::Result<()> {
 }
 
 #[derive(Default)]
-struct BrainfuckHighlighter;
+struct BrainfuckHighlighter {
+    // Per-char styles for BF commands, and a fallback for non-commands
+    map_plus: Style,
+    map_minus: Style,
+    map_lt: Style,
+    map_gt: Style,
+    map_dot: Style,
+    map_comma: Style,
+    map_lbracket: Style,
+    map_rbracket: Style,
+    map_other: Style,
+}
+
+impl BrainfuckHighlighter {
+    fn new_catppuccin_mocha() -> Self {
+        use crate::theme::catppuccin::Mocha as P;
+
+        // Character mapping
+        // > <   => SKY/TEAL (movement)
+        // + ,   => GREEN/RED (data modification)
+        // . ,   => YELLOW/PEACH (I/O)
+        // [ ]   => MAUVE (flow control)
+        let mut s = Self::default();
+        s.map_gt = Style::new().fg(P::SKY).bold();
+        s.map_lt = Style::new().fg(P::TEAL).bold();
+        s.map_plus = Style::new().fg(P::GREEN).bold();
+        s.map_minus = Style::new().fg(P::RED).bold();
+        s.map_dot = Style::new().fg(P::YELLOW).bold();
+        s.map_comma = Style::new().fg(P::PEACH).bold();
+        s.map_lbracket = Style::new().fg(P::MAUVE).bold();
+        s.map_rbracket = Style::new().fg(P::MAUVE).bold();
+        s.map_other = Style::new().fg(P::SURFACE2).bold();
+        s
+    }
+
+    #[inline]
+    fn style_for(&self, ch: char) -> Style {
+        match ch {
+            '>' => self.map_gt,
+            '<' => self.map_lt,
+            '+' => self.map_plus,
+            '-' => self.map_minus,
+            '.' => self.map_dot,
+            ',' => self.map_comma,
+            '[' => self.map_lbracket,
+            ']' => self.map_rbracket,
+            _ => self.map_other,
+        }
+    }
+}
 
 impl Highlighter for BrainfuckHighlighter {
     fn highlight(&self, line: &str, _cursor: usize) -> StyledText {
-        let bf_style = Style::new().fg(Color::Cyan).bold();
-        let non_style = Style::new().fg(Color::DarkGray);
-        
         let mut out: StyledText = StyledText::new();
-        
-        // Group contiguous BF and non-BF characters for styling
-        let mut current_is_bf: Option<bool> = None;
-        let mut current_buf = String::new();
-        
+        let mut current_style: Option<Style> = None;
+        let mut buffer = String::new();
+
         for ch in line.chars() {
-            let is_bf = matches!(ch, '>' | '<' | '+' | '-' | '.' | ',' | '[' | ']');
-            
-            match current_is_bf {
+            let style = self.style_for(ch);
+
+            match current_style {
                 None => {
-                    current_is_bf = Some(is_bf);
-                    current_buf.push(ch);
+                    current_style = Some(style);
+                    buffer.push(ch);
                 }
-                Some(cur) if cur == is_bf => {
-                    current_buf.push(ch);
+                Some(s) if s == style => {
+                    buffer.push(ch);
                 }
-                Some(_) => {
-                    // Flush previous span
-                    let style = if current_is_bf.unwrap() { bf_style } else { non_style };
-                    out.push((style, std::mem::take(&mut current_buf)));
-                    current_is_bf = Some(is_bf);
-                    current_buf.push(ch);
+                Some(s) => {
+                    out.push((s, std::mem::take(&mut buffer)));
+                    current_style = Some(style);
+                    buffer.push(ch);
                 }
             }
         }
-        
-        if !current_buf.is_empty() {
-            let style = if current_is_bf.unwrap_or(false) { bf_style } else { non_style };
-            out.push((style, current_buf));
+
+        if let Some(s) = current_style {
+            if !buffer.is_empty() {
+                out.push((s, buffer));
+            }
         }
-        
         out
     }
 }
