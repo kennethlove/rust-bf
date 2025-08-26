@@ -68,10 +68,11 @@ Interactive REPL for Brainfuck code execution.
 - Invalid instructions are ignored.
 - Tape and pointer are reset for each execution. No state is maintained.
 - Press Ctrl-D (Unix/macOS) or Ctrl-Z and then Enter (Windows) to signal EOF and execute the code.
+- Alt-Up/Down and Ctrl-Up/Down navigate command history.
 - The REPL will print the output of the Brainfuck program.
 - Press Ctrl-C to exit the REPL immediately with exit code 0.
 
-CLI features:
+### REPL Features
 
 - Multi-line buffer editing
 - Non-blocking execution
@@ -83,7 +84,8 @@ CLI features:
     - `:exit` - exit the REPL
     - `:reset` - clear the current buffer
     - `:dump` - print the current buffer
-        - add `-n` option to print line numbers
+        - add `-n` to print line numbers
+        - add `-stderr` to send everything to stderr
 
 ## Library usage
 

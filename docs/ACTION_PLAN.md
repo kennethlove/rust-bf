@@ -75,40 +75,10 @@ Goal: Provide predictable behavior for humans (interactive editor) and tooling/p
 - Acceptance
     - Manual: The current buffer displays with syntax highlighting; editing and navigation remain functional.
 
-## Phase 2: Multi-modal navigation: Edit vs History-Browse (90–150 minutes)
-
-Goal: Make Up/Down navigate history only when explicitly intended, otherwise navigate within the buffer.
-
-- Modes
-    - Edit mode (default): Up/Down move the cursor across lines inside the current buffer. History is not engaged.
-    - History-Browse mode: Up/Down navigate submission history (full-program entries) as previews.
-- Entering History-Browse
-    - Press Up when the cursor is at line 0, column 0 (the “0,0 gate”) to enter History-Browse and preview the most
-      recent submission.
-    - Optional convenience bindings: Alt+Up/Alt+Down (or Ctrl+Up/Ctrl+Down) always enter History-Browse regardless of
-      cursor location.
-    - If the buffer is empty and you press Up, jump straight to the most recent history entry (common shell behavior).
-- While browsing history
-    - Up: move to older submissions. Down: move toward newer submissions.
-    - The “current buffer” acts as a virtual newest entry; pressing Down from the most recent history entry returns to
-      it.
-    - Enter accepts the previewed history entry and switches back to Edit mode with that content loaded.
-    - Esc cancels browsing and restores the original buffer/cursor position.
-    - Any edit keystroke can implicitly accept the previewed content and return to Edit mode (optional UX choice).
-- Indicators
-    - Show a lightweight indicator while browsing, e.g., prompt suffix “[history i/N]” or a transient status line on
-      stderr.
-- State management
-    - Keep: mode, saved_current_buffer (for cancel), history_index (0 = most recent).
-    - Redraw the buffer when previews change; restore on cancel/accept.
-- Acceptance
-    - Manual: Multi-line buffers keep Up/Down for in-buffer movement; Up at (0,0) opens history; Enter accepts; Esc
-      cancels and restores edits.
-
 ## Phase 3: Meta commands parsing and behavior (45–75 minutes)
 
 - Recognition
-    - If a line starts with “:”, interpret it as a meta command immediately on Enter (do not add it to the program
+    - If a line starts with `:`, interpret it as a meta command immediately on Enter (do not add it to the program
       buffer or history).
 - Commands
     - :exit — Exit with code 0 immediately.

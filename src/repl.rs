@@ -8,6 +8,9 @@ pub fn repl_loop() -> io::Result<()> {
     // Initialize interactive line editor
     let mut editor = init_line_editor()?;
 
+    // Track the "current editing buffer" across prompts for `:dump`
+    let mut current_buffer: String = String::new();
+
     loop {
         // Prompt and read a multi-line submission via editor
         let submission = read_submission_interactive(&mut editor)?;
@@ -19,6 +22,22 @@ pub fn repl_loop() -> io::Result<()> {
         }
 
         let submission = submission.unwrap();
+
+        // Meta-command recognition: line starting with `:`
+        if let Some(meta) = parse_meta_command(&submission) {
+            match handle_meta_command(&mut editor, &meta, &current_buffer)? {
+                MetaAction::Exit => return Ok(()),
+                MetaAction::Continue => {},
+                MetaAction::ResetState => {
+                    // Clear any pending state we keep in the loop; editor buffer will be fresh next prompt
+                    current_buffer = String::new();
+                }
+            }
+            continue; // Do not execute or add to history
+        }
+
+        // Update the current buffer snapshot with what was just submitted
+        current_buffer = submission.clone();
 
         let trimmed = submission.trim();
         if trimmed.is_empty() {
@@ -116,14 +135,14 @@ fn read_submission_interactive(editor: &mut reedline::Reedline) -> io::Result<Op
     // Minimal prompt
     let prompt = DefaultPrompt::new(DefaultPromptSegment::Basic("bf".to_string()), DefaultPromptSegment::Empty);
 
-    // Render prompt and read until user submits with Ctrl+D or Ctrl+Z
+    // Render prompt and read until EOD with Ctrl+D or Ctrl+Z
     // Enter inserts a newline; history is in-memory and not browsed
     let res = editor.read_line(&prompt);
 
     match res {
         Ok(Signal::Success(buffer)) => {
             // Add one history item per submitted buffer (program-level)
-            if !buffer.trim().is_empty() {
+            if !buffer.trim().is_empty() && !buffer.trim_start().starts_with(':') {
                 let _ = editor.history_mut().save(HistoryItem::from_command_line(buffer.clone()));
             }
             Ok(Some(buffer))
@@ -311,6 +330,142 @@ impl Highlighter for BrainfuckHighlighter {
         }
         out
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MetaCommand {
+    Exit,
+    Help,
+    Reset,
+    Dump {
+        with_line_numbers: bool,
+        all_to_stderr: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetaAction {
+    Continue,
+    Exit,
+    ResetState,
+}
+
+fn parse_meta_command(input: &str) -> Option<MetaCommand> {
+    let line = input.trim();
+    if !line.starts_with(':') {
+        return None;
+    }
+    let mut parts = line.split_whitespace();
+    let head = parts.next().unwrap_or("");
+    match head {
+        ":exit" | ":quit" => Some(MetaCommand::Exit),
+        ":help" => Some(MetaCommand::Help),
+        ":reset" => Some(MetaCommand::Reset),
+        ":dump" => {
+            let mut with_line_numbers = false;
+            let mut all_to_stderr = false;
+            for arg in parts {
+                match arg {
+                    "--line-numbers" | "-n" => with_line_numbers = true,
+                    "--stderr" | "-e" => all_to_stderr = true,
+                    _ => {}
+                }
+            }
+            Some(MetaCommand::Dump { with_line_numbers, all_to_stderr })
+        }
+        _ => Some(MetaCommand::Help),
+    }
+}
+
+fn handle_meta_command(editor: &mut reedline::Reedline, cmd: &MetaCommand, current_buffer_snapshot: &str) -> io::Result<MetaAction> {
+    use reedline::EditCommand;
+
+    match cmd {
+        MetaCommand::Exit => Ok(MetaAction::Exit),
+        MetaCommand::Help => {
+            print_meta_help_text()?;
+            Ok(MetaAction::Continue)
+        }
+        MetaCommand::Reset => {
+            let _ = editor.run_edit_commands(&[EditCommand::Clear]);
+            eprintln!("buffer reset");
+            let _ = io::stderr().flush();
+            Ok(MetaAction::ResetState)
+        }
+        MetaCommand::Dump { with_line_numbers, all_to_stderr } => {
+            dump_buffer(current_buffer_snapshot, *with_line_numbers, *all_to_stderr)?;
+            Ok(MetaAction::Continue)
+        }
+    }
+}
+
+fn print_meta_help_text() -> io::Result<()> {
+    let mut err = io::stderr();
+    writeln!(err, "Meta commands:")?;
+    writeln!(err, "  :help                Show this help")?;
+    writeln!(err, "  :exit                Exit immediately (code 0)")?;
+    writeln!(err, "  :reset               Clear the current buffer")?;
+    writeln!(err, "  :dump [-n|--stderr]  Print the current buffer (approx: last executed)")?;
+    writeln!(err)?;
+    writeln!(err, "Editing: Enter inserts newline; Ctrl+D (or Ctrl+Z on Windows) submits the buffer")?;
+    writeln!(err, "Streams: program output -> stdout; prompts/meta/errors -> stderr")?;
+    err.flush()?;
+    Ok(())
+}
+
+fn dump_buffer(buf: &str, with_line_numbers: bool, all_to_stderr: bool) -> io::Result<()> {
+    let mut out_stdout = io::stdout();
+    let mut out_stderr = io::stderr();
+
+    let lines: Vec<&str> = if buf.is_empty() { Vec::new() } else { buf.split_inclusive("\n").collect() };
+    let line_count = if lines.is_empty() {
+        if buf.is_empty() { 0 } else { 1 }
+    } else {
+        // split_inclusive keeps newlines and yields at least one element when non-empty
+        let mut c = 0usize;
+        for l in &lines {
+            if l.ends_with('\n') {
+                c += 1;
+            }
+        }
+        if buf.ends_with('\n') { c } else { c + 1 }
+    };
+
+    if all_to_stderr {
+        writeln!(out_stderr, "- dump ({} lines) -", line_count)?;
+        write_dump_lines(&mut out_stderr, buf, with_line_numbers)?;
+        writeln!(out_stderr, "- end dump -")?;
+        out_stderr.flush()?;
+    } else {
+        writeln!(out_stderr, "- dump ({} lines) -", line_count)?;
+        write_dump_lines(&mut out_stdout, buf, with_line_numbers)?;
+        out_stdout.flush()?;
+        writeln!(out_stdout, "")?;
+        writeln!(out_stderr, "- end dump -")?;
+        out_stderr.flush()?;
+    }
+
+    Ok(())
+}
+
+fn write_dump_lines<W: Write>(mut w: W, buf: &str, with_line_numbers: bool) -> io::Result<()> {
+    if !with_line_numbers {
+        write!(w, "{}", buf)?;
+        return Ok(());
+    }
+
+    // Numbered lines
+    if buf.is_empty() {
+        return Ok(());
+    }
+    for (i, line) in buf.split_inclusive('\n').enumerate() {
+        // Keep newline as-is; line numbers on stdout when requested
+        write!(w, "{:>4} | {}", i + 1, line)?;
+        if !line.ends_with('\n') {
+            // If the last line lacks a newline, still print without forcing one
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
