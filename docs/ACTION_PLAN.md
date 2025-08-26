@@ -38,6 +38,43 @@ defaults.
 - Acceptance
     - Manual: Left/Right move the cursor; Up/Down move across lines within the current buffer; EOF submits.
 
+## 1.25: Interactive vs Non-interactive (Bare) mode policy (15–30 minutes)
+
+Goal: Provide predictable behavior for humans (interactive editor) and tooling/pipes (bare), with simple overrides.
+
+- Default mode selection (auto-detect):
+    - If stdin is a TTY: start the interactive editor REPL.
+    - If stdin is not a TTY (piped/redirected): run in bare mode — read until EOF, execute once, then exit 0.
+    - Prompt/meta output:
+        - Continue to use stderr for prompts/meta/errors.
+        - If stderr is not a TTY, suppress prompts/banners to keep pipeline output clean.
+- Flags:
+    - --bare (alias: --non-interactive): force bare mode even if stdin is a TTY.
+    - --editor: force interactive mode. If stdin is not a TTY, print a concise error on stderr and exit with code 1.
+- Environment override (optional):
+    - BF_REPL_MODE=bare|editor. CLI flags take precedence over the environment.
+- Behavior details:
+    - Bare mode:
+        - No line editor or history; single submission read until EOF; execute once; exit 0.
+        - No syntax highlighting is needed.
+        - Stream policy unchanged: program output to stdout; meta/errors to stderr.
+    - Interactive mode:
+        - Multiline editing with Enter inserting newline; EOF (e.g., Ctrl-D) submits.
+        - Session-scoped in-memory history; no file persistence.
+        - Meta commands available.
+        - Syntax highlighting
+    - Ctrl-C behavior unchanged: exits immediately and cleanly with code 0.
+- Acceptance:
+    - Piping input into the REPL executes once and exits 0; outputs respect stream policy; prompts are suppressed when stderr is not a TTY.
+    - --bare forces bare behavior on a TTY; --editor errors out on non-TTY stdin with a clear message and exit code 1.
+    - BF_REPL_MODE works when set; flags override it.
+
+## Phase 1.5: Syntax highlighting (60–90 minutes)
+- Integrate a syntax highlighting library (e.g., syntect).
+- Define a simple theme for Brainfuck syntax (e.g., commands in one color, non-command characters in another).
+- Acceptance
+    - Manual: The current buffer displays with syntax highlighting; editing and navigation remain functional.
+
 ## Phase 2: Multi-modal navigation: Edit vs History-Browse (90–150 minutes)
 
 Goal: Make Up/Down navigate history only when explicitly intended, otherwise navigate within the buffer.
