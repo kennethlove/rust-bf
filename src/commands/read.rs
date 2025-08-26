@@ -86,9 +86,9 @@ pub fn run(program: &str, args: ReadArgs) -> i32 {
     let cancel_clone = cancel.clone();
 
     thread::spawn(move || {
-        let max_steps: usize = max_steps.unwrap_or(usize::MAX as u64) as usize;
+        let max_steps_opt: Option<usize> = max_steps.map(|m| m as usize);
         let mut bf = BrainfuckReader::new(program_owned);
-        let ctrl = StepControl::new(Some(max_steps), cancel_clone);
+        let ctrl = StepControl::new(max_steps_opt, cancel_clone);
         let res = if debug {
             bf.run_debug_with_control(ctrl)
         } else {
