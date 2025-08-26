@@ -2,7 +2,6 @@ use std::env;
 use std::io::{self, IsTerminal, Write};
 use reedline::{Signal, DefaultPrompt, DefaultPromptSegment, HistoryItem, Highlighter, StyledText};
 use nu_ansi_term::Style;
-
 use crate::{cli_util, BrainfuckReader};
 
 pub fn repl_loop() -> io::Result<()> {
@@ -54,6 +53,26 @@ fn init_line_editor() -> io::Result<reedline::Reedline> {
     keybindings.add_binding(KeyModifiers::NONE, KeyCode::Enter, ReedlineEvent::Edit(vec![EditCommand::InsertNewline]));
     keybindings.add_binding(KeyModifiers::CONTROL, KeyCode::Char('d'), ReedlineEvent::Submit);
     keybindings.add_binding(KeyModifiers::CONTROL, KeyCode::Char('z'), ReedlineEvent::Submit);
+    
+    // Default edit-mode navigation.
+    // Up/down move within the current multiline buffer, not history.
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Up,
+        ReedlineEvent::Up
+    );
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Down,
+        ReedlineEvent::Down
+    );
+    
+    // Explicit history-mode convenience bindings
+    // Alt+Up/Alt+Down or Ctrl+Up/Ctrl+Down to navigate history items.
+    keybindings.add_binding(KeyModifiers::ALT, KeyCode::Up, ReedlineEvent::PreviousHistory);
+    keybindings.add_binding(KeyModifiers::CONTROL, KeyCode::Up, ReedlineEvent::PreviousHistory);
+    keybindings.add_binding(KeyModifiers::ALT, KeyCode::Down, ReedlineEvent::NextHistory);
+    keybindings.add_binding(KeyModifiers::CONTROL, KeyCode::Down, ReedlineEvent::NextHistory);
 
     let history = reedline::FileBackedHistory::new(1_000).unwrap();
 
