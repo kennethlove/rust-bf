@@ -1,8 +1,12 @@
-use std::env;
+use std::{env, thread};
 use std::io::{self, IsTerminal, Write};
+use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 use reedline::{Signal, DefaultPrompt, DefaultPromptSegment, HistoryItem, Highlighter, StyledText};
 use nu_ansi_term::Style;
-use crate::{cli_util, BrainfuckReader};
+use crate::{cli_util, BrainfuckReader, BrainfuckReaderError};
+use crate::reader::StepControl;
 
 pub fn repl_loop() -> io::Result<()> {
     // Initialize interactive line editor
@@ -172,12 +176,48 @@ fn bf_only(s: &str) -> String {
 /// - A newline is always written to stdout after execution (success or error)
 ///   so that the prompt begins at column 0 on the next iteration.
 fn execute_bf_buffer(buffer: String) {
-    let mut bf = BrainfuckReader::new(buffer.clone());
-    if let Err(err) = bf.run() {
-        // Styled error header for TTY stderr; keep pipelines clean otherwise
-        cli_util::print_reader_error(None, &buffer, &err);
-        let _ = io::stderr().flush();
+    // Limits from environment variables
+    let timeout_ms = env::var("BF_TIMEOUT_MS").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(2_000);
+    let max_steps = env::var("BF_MAX_STEPS").ok().and_then(|s| s.parse::<usize>().ok());
+
+    // Cooperative cancellation flag
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel::<Result<(), BrainfuckReaderError>>();
+    let program = buffer.clone();
+    let cancel_flag_clone = cancel_flag.clone();
+
+    thread::spawn(move || {
+        let mut bf = BrainfuckReader::new(program);
+        let ctrl = StepControl::new(max_steps, cancel_flag_clone);
+        // Run with cooperative cancellation
+        let res = bf.run_with_control(ctrl);
+        let _ = tx.send(res);
+    });
+
+    let timeout = Duration::from_millis(timeout_ms as u64);
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(())) => { } // Success
+        Ok(Err(BrainfuckReaderError::StepLimitExceeded { limit })) => {
+            eprintln!("Execution aborted: step limit exceeded ({limit})");
+            let _ = io::stderr().flush();
+        }
+        Ok(Err(BrainfuckReaderError::Canceled)) => {
+            eprintln!("Execution aborted: wall-clock timeout ({timeout_ms} ms)");
+            let _ = io::stderr().flush();
+        }
+        Ok(Err(other)) => {
+            cli_util::print_reader_error(None, &buffer, &other);
+            let _ = io::stderr().flush();
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // Signal cancel and inform the user
+            cancel_flag.store(true, Ordering::Relaxed);
+            eprintln!("Execution aborted: wall-clock timeout ({} ms)", timeout_ms);
+            let _ = io::stderr().flush();
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {} // Worker ended unexpectedly; nothing to add
     }
+
     println!();
     let _ = io::stdout().flush(); // Ensure output is flushed
 }

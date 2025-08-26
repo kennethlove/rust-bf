@@ -1,8 +1,12 @@
 use clap::Args;
-use std::fs;
+use std::{fs, thread};
 use std::io::{self, Write};
-use crate::BrainfuckReader;
+use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use crate::{BrainfuckReader, BrainfuckReaderError};
 use crate::cli_util::print_reader_error;
+use crate::reader::StepControl;
 
 #[derive(Args, Debug)]
 #[command(disable_help_flag = true)]
@@ -19,6 +23,14 @@ pub struct ReadArgs {
     #[arg(value_name = "code", trailing_var_arg = true)]
     pub code: Vec<String>,
 
+    /// Wall-clock timeout in milliseconds (fallback BF_TIMEOUT_MS; default 2_000)
+    #[arg(long = "timeout", value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+
+    /// Maximum interpreter steps before abort (fallback BF_MAX_STEPS; default unlimited)
+    #[arg(long = "max-steps", value_name = "N")]
+    pub max_steps: Option<u64>,
+
     /// Show this help
     #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
     pub help: bool,
@@ -33,6 +45,8 @@ pub fn run(program: &str, args: ReadArgs) -> i32 {
         debug,
         file,
         code,
+        timeout_ms,
+        max_steps,
         ..
     } = args;
 
@@ -58,20 +72,61 @@ pub fn run(program: &str, args: ReadArgs) -> i32 {
         code.join("")
     };
 
-    // Execute the original code so that error ip matches the original source
-    let mut bf = BrainfuckReader::new(code_str.clone());
-    let result = if debug { bf.run_debug() } else { bf.run() };
+    // Resolve limits: flags -> env -> defaults
+    let timeout_ms = timeout_ms
+        .or_else(|| std::env::var("BF_TIMEOUT_MS").ok().and_then(|s| s.parse::<u64>().ok()))
+        .unwrap_or(2_000);
+    let max_steps = max_steps
+        .or_else(|| std::env::var("BF_MAX_STEPS").ok().and_then(|s| s.parse::<u64>().ok()));
 
-    if let Err(err) = result {
-        print_reader_error(Some(program), &code_str, &err);
-        let _ = std::io::stderr().flush();
-        return 1;
-    }
+    // Execute on a worker thread with cooperative cancellation
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel::<Result<(), BrainfuckReaderError>>();
+    let program_owned = code_str.clone();
+    let cancel_clone = cancel.clone();
 
-    // For readability, ensure output ends with a newline
+    thread::spawn(move || {
+        let max_steps: usize = max_steps.unwrap_or(usize::MAX as u64) as usize;
+        let mut bf = BrainfuckReader::new(program_owned);
+        let ctrl = StepControl::new(Some(max_steps), cancel_clone);
+        let res = if debug {
+            bf.run_debug_with_control(ctrl)
+        } else {
+            bf.run_with_control(ctrl)
+        };
+        let _ = tx.send(res);
+    });
+
+    let timeout = Duration::from_millis(timeout_ms);
+    let exit_code = match rx.recv_timeout(timeout) {
+        Ok(Ok(())) => 0,
+        Ok(Err(BrainfuckReaderError::StepLimitExceeded { limit })) => {
+            eprintln!("Execution aborted: step limit exceeded ({limit})");
+            let _ = io::stderr().flush();
+            1
+        }
+        Ok(Err(BrainfuckReaderError::Canceled)) => {
+            eprintln!("Execution aborted: wall-clock timeout exceeded ({timeout_ms} ms)");
+            let _ = io::stderr().flush();
+            1
+        }
+        Ok(Err(other)) => {
+            print_reader_error(Some(program), &code_str, &other);
+            let _ = io::stderr().flush();
+            1
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            cancel.store(true, Ordering::Relaxed);
+            eprintln!("Execution aborted: wall-clock timeout exceeded ({timeout_ms} ms)");
+            let _ = io::stderr().flush();
+            1
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => 1,
+    };
+
     println!();
     let _ = io::stdout().flush();
-    0
+    exit_code
 }
 
 fn usage_and_exit(program: &str, code: i32) -> ! {

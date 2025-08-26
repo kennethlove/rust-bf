@@ -21,7 +21,18 @@ You need Rust and Cargo installed.
 
 ## CLI usage (read)
 
-The CLI concatenates all args into the Brainfuck program and runs it. It prints a trailing newline after execution.
+The `read` command interprets and runs Brainfuck code. It prints a trailing newline after execution.
+
+Flags:
+- `--debug` or `-d`: run in debug mode (prints a step-by-step table)
+- `--memory <size>` or `-m <size>`: set custom memory tape size (default: 30,000 cells)
+- `--max-steps <steps>` or `-s <steps>`: limit execution to a maximum number of steps (default: unlimited)
+- `--timeout <seconds>` or `-t <seconds>`: limit execution time (default: unlimited)
+- `--help` or `-h`: show help information
+
+Env vars:
+- `BF_TIMEOUT`: set default timeout in seconds (overridden by `--timeout`)
+- `BF_MAX_STEPS`: set default max steps (overridden by `--max-steps`)
 
 Examples:
 
@@ -36,6 +47,15 @@ Examples:
 - Debug mode (prints a table instead of executing I/O)
   - `cargo run --bin bf -- read --debug ">+.<"`
   - Useful for understanding control flow; `,` behaves as EOF (cell set to 0) and `.` output is suppressed
+
+- From a file
+  - `cargo run --bin bf -- read --file ./hello.bf`
+
+- From a file with custom memory size and max steps
+  - `cargo run --bin bf -- read --file ./hello.bf --memory 10000 --max-steps 100000`
+
+- From a file with a timeout of 2 seconds
+  - `cargo run --bin bf -- read --file ./hello.bf --timeout 2`
 
 Notes:
 - Non-Brainfuck characters cause an error.
@@ -76,8 +96,10 @@ Interactive REPL for Brainfuck code execution.
 
 - Multi-line buffer editing
 - Non-blocking execution
-  - Configurable with flags
-  - Default timeout: XXXX seconds, default max steps: YYYY
+  - Configurable with environment variables:
+    - `BF_REPL_TIMEOUT` - max execution time in seconds (default: 2,000)
+    - `BF_REPL_MAX_STEPS` - max execution steps (default: unlimited)
+  - Default timeout: 2,000 seconds, default max steps: unlimited
 - Command history (up/down arrows on a blank buffer)
 - Meta-commands (start with `:`):
     - `:help` - show help
