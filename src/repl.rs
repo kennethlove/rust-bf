@@ -137,9 +137,6 @@ fn execute_bf_buffer(buffer: String) {
     let mut bf = BrainfuckReader::new(buffer.clone());
     if let Err(err) = bf.run() {
         // Styled error header for TTY stderr; keep pipelines clean otherwise
-        if io::stderr().is_terminal() {
-            print_styled_error_header("Execution error");
-        }
         cli_util::print_reader_error(None, &buffer, &err);
         let _ = io::stderr().flush();
     }
@@ -295,18 +292,6 @@ impl Highlighter for BrainfuckHighlighter {
         }
         out
     }
-}
-
-fn print_styled_error_header(title: &str) {
-    use nu_ansi_term::Style;
-    use crate::theme::catppuccin::Mocha as P;
-    
-    let header = Style::new().fg(P::RED).bold().paint(format!("✖ {title}"));
-    let divider = Style::new().fg(P::SURFACE2).paint("-".repeat(30));
-    
-    eprintln!("{header}");
-    eprintln!("{divider}");
-    let _ = io::stderr().flush();
 }
 
 #[cfg(test)]

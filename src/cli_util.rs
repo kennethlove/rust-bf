@@ -1,4 +1,5 @@
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
+use nu_ansi_term::Style;
 use crate::BrainfuckReaderError;
 
 /// Pretty-print structured BrainfuckReaderError with caret positioning.
@@ -37,7 +38,16 @@ pub fn print_reader_error(program: Option<&str>, code: &str, err: &BrainfuckRead
 /// Print a concise error with instruction index and a caret context window,
 /// working with UTF-8 by slicing using char indices.
 pub fn print_error_with_context(prefix: &str, code: &str, pos: usize) {
-    eprintln!("{prefix} at instruction {pos}");
+    use crate::theme::catppuccin::Mocha as P;
+    
+    let is_tty = io::stderr().is_terminal();
+    
+    if is_tty {
+        let styled = Style::new().fg(P::RED).bold().paint(format!("{prefix} at instruction {pos}"));
+        eprintln!("{styled}");
+    } else {
+        eprintln!("{prefix} at instruction {pos}");
+    }
 
     // Show a short window around the position for context
     const WINDOW_CHARS: usize = 32;
@@ -54,12 +64,17 @@ pub fn print_error_with_context(prefix: &str, code: &str, pos: usize) {
 
     // Caret under the exact position
     let caret_offset_chars = pos.saturating_sub(start_char);
-    let mut underline = String::new();
+    let mut spaces = String::new();
     for _ in 0..caret_offset_chars {
-        underline.push(' ');
+        spaces.push(' ');
     }
-    underline.push('^');
-    eprintln!("  {}", underline);
+    
+    if is_tty {
+        let caret = Style::new().fg(P::YELLOW).bold().paint("^");
+        eprintln!("  {}{}", spaces, caret);
+    } else {
+        eprintln!("  {}^", spaces);
+    }
     let _ = io::stderr().flush();
 }
 
