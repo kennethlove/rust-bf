@@ -25,6 +25,10 @@
 //! ```
 
 use std::fmt;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 /// Errors that can occur while interpreting Brainfuck code.
 #[derive(Debug, thiserror::Error)]
@@ -44,6 +48,14 @@ pub enum BrainfuckReaderError {
     /// An underlying I/O error occurred when reading from stdin.
     #[error("I/O error at instruction {ip}: {source}")]
     IoError { ip: usize, #[source] source: std::io::Error },
+
+    /// Execution aborted due to step limit.
+    #[error("Execution aborted: step limit exceeded ({limit})")]
+    StepLimitExceeded { limit: usize },
+
+    /// Execution aborted due to cooperative cancellation (e.g., timeout)
+    #[error("Execution aborted: cancelled")]
+    Canceled,
 }
 
 /// Which side of the loop was unmatched.
@@ -59,6 +71,19 @@ impl fmt::Display for UnmatchedBracketKind {
             UnmatchedBracketKind::Open => write!(f, "'['"),
             UnmatchedBracketKind::Close => write!(f, "']'"),
         }
+    }
+}
+
+/// Controls for cooperative cancellation and step limiting.
+#[derive(Clone)]
+pub struct StepControl {
+    pub max_steps: Option<usize>,
+    pub cancel_flag: Arc<AtomicBool>,
+}
+
+impl StepControl {
+    pub fn new(max_steps: Option<usize>, cancel_flag: Arc<AtomicBool>) -> Self {
+        Self { max_steps, cancel_flag }
     }
 }
 
@@ -96,7 +121,7 @@ impl BrainfuckReader {
     }
 
     /// Internal executor shared by run and run_debug.
-    fn execute(&mut self, debug: bool) -> Result<(), BrainfuckReaderError> {
+    fn execute(&mut self, debug: bool, step_control: Option<&StepControl>) -> Result<(), BrainfuckReaderError> {
         let mut code_ptr = 0;
         let chars: Vec<char> = self.code.chars().collect();
         let code_len = chars.len();
@@ -137,6 +162,22 @@ impl BrainfuckReader {
         }
 
         while code_ptr < code_len {
+            // Cooperative cancellation check
+            if let Some(ctrl) = step_control {
+                if ctrl.cancel_flag.load(Ordering::Relaxed) {
+                    return Err(BrainfuckReaderError::Canceled);
+                }
+            }
+
+            // Step counting
+            if let Some(ctrl) = step_control {
+                if let Some(max) = ctrl.max_steps {
+                    if step >= max {
+                        return Err(BrainfuckReaderError::StepLimitExceeded { limit: max });
+                    }
+                }
+            }
+
             let instr = chars[code_ptr];
             let (ptr_before, cell_before) = (self.pointer, self.memory[self.pointer]);
             let mut action: Option<String> = if debug { Some(String::new()) } else { None };
@@ -241,6 +282,8 @@ impl BrainfuckReader {
                 step += 1;
             }
 
+            // Advance step counter
+            step += 1;
             // Move to the next instruction
             code_ptr += 1;
         }
@@ -252,7 +295,7 @@ impl BrainfuckReader {
     ///
     /// Returns `Ok(())` on success or a [`BrainfuckReaderError`] on failure.
     pub fn run(&mut self) -> Result<(), BrainfuckReaderError> {
-        self.execute(false)
+        self.execute(false, None)
     }
 
     /// Debug-run the Brainfuck program, printing a step-by-step table of operations
@@ -260,11 +303,18 @@ impl BrainfuckReader {
     /// advances exactly as it would during a real run, but:
     /// - '.' does not print the character; we log the action instead
     /// - ',' does not read from stdin; we simulate EOF and set the cell to 0 and log
-    pub fn run_debug(&mut self) -> Result<(), BrainfuckReaderError> {
-        self.execute(true)
+    pub fn run_debug(&mut self) -> Result<(), BrainfuckReaderError> { self.execute(true, None) }
+
+    /// Execute with cooperative cancellation and optional step limit.
+    pub fn run_with_control(&mut self, step_control: StepControl) -> Result<(), BrainfuckReaderError> {
+        self.execute(false, Some(&step_control))
+    }
+
+    /// Debug-run with cooperative cancellation and optional step limit.
+    pub fn run_debug_with_control(&mut self, step_control: StepControl) -> Result<(), BrainfuckReaderError> {
+        self.execute(true, Some(&step_control))
     }
 }
-
 
 
 #[cfg(test)]

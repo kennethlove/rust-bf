@@ -32,6 +32,14 @@ pub fn print_reader_error(program: Option<&str>, code: &str, err: &BrainfuckRead
             let msg = prefix_program(&format!("I/O error: {source}"));
             print_error_with_context(&msg, code, *ip);
         }
+        BrainfuckReaderError::StepLimitExceeded { limit } => {
+            let msg = prefix_program(&format!("Step limit exceeded ({limit}"));
+            print_error_with_context(&msg, code, 0);
+        }
+        BrainfuckReaderError::Canceled => {
+            let msg = prefix_program("Wall-clock timeout exceeded");
+            print_error_with_context(&msg, code, 0);
+        }
     }
 }
 

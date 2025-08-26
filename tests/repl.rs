@@ -1,4 +1,3 @@
-use predicates::prelude::*;
 
 // Utilities
 fn make_cmd() -> assert_cmd::Command {
@@ -8,11 +7,11 @@ fn make_cmd() -> assert_cmd::Command {
 #[test]
 fn repl_initial_prompt_appears() {
     let mut cmd = make_cmd();
-    // Start REPL with no args, then close stdin to end deterministically
+    // In non-TTY (piped) stdin, REPL auto-selects bare mode and prints no prompt.
     cmd.write_stdin("")
         .assert()
         .success()
-        .stdout(predicates::str::contains("bf> "))
+        .stdout(predicates::str::is_empty())
         .stderr(predicates::str::is_empty());
 }
 
@@ -27,9 +26,8 @@ fn repl_valid_program_then_eof_outputs_and_exits() {
         .assert()
         .success()
         .stdout(
-            // Should contain the prompt first and then the program output with a trailing newline
-            predicates::str::contains("bf> ")
-                .and(predicates::str::contains("A\n"))
+            // In bare mode, only program output goes to stdout
+            predicates::str::contains("A\n")
         )
         .stderr(predicates::str::is_empty());
 }
@@ -41,9 +39,10 @@ fn repl_invalid_program_reports_error_and_exits() {
     cmd.env("BF_REPL_ONCE", "1")
         .write_stdin("]") // stray closing bracket is a parse error
         .assert()
-        .success() // REPL should stay calm and exit cleanly when BF_REPL_ONCE=1
+        .success() // exits cleanly in our bare-mode pipeline when stdin closes
         .stderr(predicates::str::contains("Parse error: unmatched bracket"))
-        .stdout(predicates::str::contains("bf> "));
+        // REPL prints a trailing newline on stdout after each execution for readability
+        .stdout(predicates::str::contains("\n"));
 }
 
 #[test]
@@ -53,7 +52,7 @@ fn repl_empty_submission_exits_cleanly() {
     cmd.write_stdin("")
         .assert()
         .success()
-        .stdout(predicates::str::contains("bf> "))
+        .stdout(predicates::str::is_empty())
         .stderr(predicates::str::is_empty());
 }
 
