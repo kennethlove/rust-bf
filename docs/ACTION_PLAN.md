@@ -1,192 +1,130 @@
-# Version 0.3.0 — Advanced REPL Plan
+# Version 0.4.0 — TUI Plan
 
-Scope: Add richer line editing and history, multi-modal navigation (Edit vs History-Browse), meta commands, and
-non-blocking execution guarantees while preserving the simple “submit-on-EOF” workflow and stdout/stderr separation.
+Project goals and constraints
+- UI: TUI-only (ratatui + crossterm).
+- Execution: run/stop only.
+- Input on ,: prompt the user; cancel means EOF.
+- Semantics: 30,000 cells, 8-bit wrap on +/-; pointer wraps; tape window size = 32.
+- Output: raw by default; toggle to escaped rendering.
+- Use your existing library (BrainfuckReader, BrainfuckReaderError, ModeFlagOverride, commands/repl/theme as helpful). Do not use BrainfuckWriter.
 
-## Phase 0: UX decisions and semantics (15–30 minutes)
+High-level UX and layout
+- Left pane: Editor
+    - Multiline text editing, vertical scroll.
+    - Minimal Brainfuck syntax highlighting for <>+-.,[].
+    - Matching bracket highlight when cursor on [ or ].
+- Bottom-left: Output pane
+    - Scrollback of program output.
+    - Toggle to switch between raw and escaped display.
+    - Input prompt line appears here when , is encountered.
+- Right pane: Tape
+    - Dense 32-cell window around data pointer.
+    - Highlights pointer cell; shows absolute pointer index and current value.
+- Status bar
+    - Filename and dirty indicator.
+    - Run state (Running/Stopped).
+    - Pointer index and current cell value.
+    - Output display mode (Raw/Esc).
+    - Last message or error.
 
-- Input model and submission
-    - Users edit a multi-line buffer; EOF submits the entire buffer for execution.
-    - Enter inserts a newline; no implicit submission on Enter.
-- Streams policy
-    - Program output: stdout, exactly as produced by the interpreter.
-    - REPL/meta output (prompts, help, banners, errors): stderr for framing and messages. See :dump below for details.
-- Meta commands (line starts with “:”)
-    - :exit — Exit immediately with code 0 (same as Ctrl-C policy).
-    - :help — Print advanced usage (key bindings, meta commands, EOF per OS, timeout policy).
-    - :reset — Clear the current editing buffer (does not touch history).
-    - :dump — Print the current editing buffer for inspection.
-        - Default: raw buffer lines to stdout; framing markers to stderr.
-        - Options: “-n” to include line numbers in stdout; “--stderr” to force the entire dump to stderr.
-- Non-blocking execution
-    - Configure a step limit and a wall-clock timeout. If either is exceeded, abort execution, print a concise message,
-      and return to the prompt.
-    - Defaults are sensible and configurable via CLI flags and environment variables.
+Keybindings
+- Run: F5 or Ctrl+R
+- Stop: Shift+F5 or Ctrl+.
+- Open: Ctrl+O
+- Save: Ctrl+S
+- Switch pane focus: Tab / Shift+Tab
+- Output view toggle (Raw/Escaped): Ctrl+E
+- Help overlay: F1 / Ctrl+H
+- Editor navigation: Arrows, PageUp/PageDown, Home/End
+- Tape pane navigation: [ and ] to shift the 32-cell window; Left/Right to move highlight when focused
+- Input prompt during ,: Enter submits first byte; Esc cancels (EOF)
 
-Acceptance: A concise docs section explains edit/history modes, meta commands, stream policy, and timeout/step-limit
-defaults.
+Architecture and data flow (no code)
+- Threads and channels
+    - UI thread: renders TUI, handles key events, manages files, shows input modal, toggles output mode.
+    - Runner thread: executes Brainfuck using the library; sends events back to UI.
+    - Channels:
+        - Runner -> UI: Output(bytes), Tape(ptr, 32-cell window), NeedsInput, Halted(success/error), optional heartbeat.
+        - UI -> Runner: Start(source, config), Stop, ProvideInput(Some(byte) or None for EOF).
+- Library integration
+    - Parse and run with BrainfuckReader; display BrainfuckReaderError messages in status bar on failure.
+    - Apply pointer wrap behavior via ModeFlagOverride (or equivalent).
+    - Output: capture produced bytes and forward to UI as events.
+    - Input: on , request, post NeedsInput to UI; wait for ProvideInput (None = EOF).
+    - Stop: listen for Stop signal and exit cleanly.
 
-## Phase 1: Line editor integration (60–120 minutes)
+Execution semantics and tape window
+- Pointer wrap-around at edges.
+- 32-cell window centered on the pointer when possible; handle wrap-around near boundaries.
+- Periodic state snapshots from runner: current pointer index and 32-cell slice.
 
-- Integrate a line editor supporting:
-    - Multiline editing and in-buffer Left/Right/Up/Down navigation.
-    - History with program-level entries (one entry per submitted buffer).
-    - Custom keybindings and redraw APIs to print meta output and restore the buffer/cursor.
-- Behavior
-    - Prompt remains short, e.g., “bf> ”.
-    - History is session-scoped; file persistence can be deferred.
-- Acceptance
-    - Manual: Left/Right move the cursor; Up/Down move across lines within the current buffer; EOF submits.
+File I/O behavior
+- Open (Ctrl+O): prompt for path, load, mark dirty=false.
+- Save (Ctrl+S): write to current path (or prompt for one), mark dirty=false.
+- On unsaved changes before destructive actions: confirm with a simple yes/no modal.
 
-## 1.25: Interactive vs Non-interactive (Bare) mode policy (15–30 minutes)
+Output display modes
+- Raw (default): render bytes as-is (terminal control bytes may affect display).
+- Escaped: printable ASCII as-is, non-printables as escaped sequences (e.g., \xNN). Toggle with Ctrl+E.
 
-Goal: Provide predictable behavior for humans (interactive editor) and tooling/pipes (bare), with simple overrides.
+## Phased delivery plan
 
-- Default mode selection (auto-detect):
-    - If stdin is a TTY: start the interactive editor REPL.
-    - If stdin is not a TTY (piped/redirected): run in bare mode — read until EOF, execute once, then exit 0.
-    - Prompt/meta output:
-        - Continue to use stderr for prompts/meta/errors.
-        - If stderr is not a TTY, suppress prompts/banners to keep pipeline output clean.
-- Flags:
-    - --bare (alias: --non-interactive): force bare mode even if stdin is a TTY.
-    - --editor: force interactive mode. If stdin is not a TTY, print a concise error on stderr and exit with code 1.
-- Environment override (optional):
-    - BF_REPL_MODE=bare|editor. CLI flags take precedence over the environment.
-- Behavior details:
-    - Bare mode:
-        - No line editor or history; single submission read until EOF; execute once; exit 0.
-        - No syntax highlighting is needed.
-        - Stream policy unchanged: program output to stdout; meta/errors to stderr.
-    - Interactive mode:
-        - Multiline editing with Enter inserting newline; EOF (e.g., Ctrl-D) submits.
-        - Session-scoped in-memory history; no file persistence.
-        - Meta commands available.
-        - Syntax highlighting
-    - Ctrl-C behavior unchanged: exits immediately and cleanly with code 0.
-- Acceptance:
-    - Piping input into the REPL executes once and exits 0; outputs respect stream policy; prompts are suppressed when stderr is not a TTY.
-    - --bare forces bare behavior on a TTY; --editor errors out on non-TTY stdin with a clear message and exit code 1.
-    - BF_REPL_MODE works when set; flags override it.
+1. TUI scaffolding
+    - Initialize terminal; implement layout for editor, output, tape, and status bar.
+    - Focus handling and keybinding dispatch.
+    - Minimal syntax highlighting for BF tokens and matching bracket highlight.
 
-## Phase 1.5: Syntax highlighting (60–90 minutes)
-- Integrate a syntax highlighting library (e.g., syntect).
-- Define a simple theme for Brainfuck syntax (e.g., commands in one color, non-command characters in another).
-- Acceptance
-    - Manual: The current buffer displays with syntax highlighting; editing and navigation remain functional.
+2. Runner wiring
+    - Define channels/events for UI <-> runner.
+    - Start/Stop lifecycle: parse with BrainfuckReader; on error, show message; on success, run on worker thread.
+    - Periodically send output and tape snapshots; send completion and error events.
 
-## Phase 3: Meta commands parsing and behavior (45–75 minutes)
+3. Input prompt on ,
+    - Display a modal prompt using reedline for single-byte input.
+    - Enter sends the first byte; Esc sends EOF (None).
+    - Suspend other keybindings while modal is active.
 
-- Recognition
-    - If a line starts with `:`, interpret it as a meta command immediately on Enter (do not add it to the program
-      buffer or history).
-- Commands
-    - :exit — Exit with code 0 immediately.
-    - :help — Print:
-        - Key bindings: Left/Right, Up/Down in Edit mode; history controls; EOF per OS.
-        - Modes: entering/leaving History-Browse (0,0 gate, Esc, Enter).
-        - Meta commands and examples.
-        - Timeout/step-limit defaults and configuration.
-    - :reset — Clear the current buffer and reposition cursor to start; history remains intact.
-    - :dump — Print buffer content without modifying it:
-        - Default: raw lines to stdout; framing markers (e.g., “— dump (N lines) —” and “— end dump —”) to stderr.
-        - Flags: -n (line numbers on stdout), --stderr (everything to stderr).
-- Redraw discipline
-    - Before printing meta output, temporarily yield the editor view; after printing, re-render prompt and restore
-      buffer/cursor.
-- Acceptance
-    - Manual: Meta commands do not alter the buffer (except :reset), do not enter history, and redraw cleanly.
+4. Tape pane (32 cells)
+    - Render pointer index, 32-cell window with wrap-around.
+    - Highlight current cell; show absolute index/value in status.
 
-## Phase 4: Execution isolation and non-blocking guarantees (90–150 minutes)
+5. Output pane and toggle
+    - Append incoming bytes; implement scrollback behavior.
+    - Add Raw/Escaped toggle; re-render using the same buffer.
 
-- Design
-    - Run the interpreter on a worker thread.
-    - Cooperative cancellation via:
-        - Step counting inside the interpreter; exceed -> return a specific “step limit exceeded” error.
-        - Time-based deadline from the REPL; on timeout, signal cancellation and join with a deadline.
-- Configuration
-    - CLI flags: --timeout <ms> and --max-steps <n> with sensible defaults.
-    - Env vars: BF_TIMEOUT_MS and BF_MAX_STEPS as fallbacks.
-- User messages
-    - On step limit: “Execution aborted: step limit exceeded (N).”
-    - On timeout: “Execution aborted: wall-clock timeout (T ms).”
-- Acceptance
-    - Manual: Infinite/non-terminating programs are aborted promptly; REPL stays responsive and ready for the next
-      input.
+6. File open/save
+    - Simple path prompts; handle errors with status messages.
+    - Track file path and dirty state.
 
-## Phase 5: Signal handling and shutdown (30–45 minutes)
+7. Polish and help
+    - Status messages for run completion, stop, and errors.
+    - Help overlay (F1) listing keybindings and behaviors.
+    - Graceful terminal teardown on exit and on errors.
 
-- Maintain behavior: Ctrl-C exits immediately and cleanly with code 0.
-- Ensure the worker thread does not block shutdown; flush streams on exit.
-- Acceptance
-    - Manual: Pressing Ctrl-C at prompt or during execution exits with code 0; no terminal mess.
+Acceptance criteria
+- Can edit, open, and save Brainfuck source files.
+- Run executes the program; Stop halts promptly.
+- Output appears in real time; toggle between Raw and Escaped works.
+- On , program pauses; input modal accepts one byte; Esc yields EOF.
+- Tape pane shows a correct 32-cell window with pointer highlighting and wraps at edges.
+- Status bar reflects run state, pointer index, current cell value, file info, and output mode.
+- Unmatched brackets or other parse/runtime errors are shown clearly without crashing the UI.
 
-## Phase 6: I/O and flushing polish (15–30 minutes)
+Testing checklist (manual)
+- Hello World: correct output, Raw/Escaped toggling.
+- Echo program: prompts on , and echoes typed byte; Esc at prompt leads to EOF behavior.
+- Pointer wrap program: verify left of 0 wraps to end and right of end wraps to 0.
+- Long-running loop: Stop is responsive and returns to Stopped state.
+- File I/O: Open/Save workflows, dirty flag handling, error messages for invalid paths.
 
-- Explicitly flush after:
-    - Printing prompts.
-    - Printing interpreter output.
-    - Printing meta/help/error messages.
-- Acceptance
-    - Manual: Outputs appear promptly; ordering remains consistent.
+Risk management
+- Deadlock on input: ensure runner posts NeedsInput before blocking and UI always responds ProvideInput(Some/None).
+- UI overwhelm: batch output and tape updates (by time or instruction count).
+- Raw output control bytes disrupting terminal: provide Escaped mode in help; default to Raw but document the toggle.
 
-## Phase 7: Tests and reliability (90–180 minutes)
-
-- Integration tests (assert_cmd + predicates)
-    - Valid program: submit via stdin, check stdout matches; process continues (or exits cleanly when stdin closes).
-    - Invalid program: print concise error and remain usable.
-    - Empty submission: re-prompt behavior is consistent and non-crashing.
-    - Non-blocking: a non-terminating program triggers timeout/step-limit message; process does not hang on CI.
-    - Meta commands: :help, :exit, :reset, :dump behaviors (assert stream separation and exit code for :exit).
-- Mode logic tests
-    - Unit-test the Edit vs History-Browse state machine: 0,0 gate, Esc restore, Enter accept, index bounds, and
-      “virtual current buffer” behavior.
-    - Automated terminal key simulation for multi-line cursor motion is brittle; cover the state machine in unit tests
-      and rely on a manual checklist for interactive nuances.
-- Acceptance
-    - CI green across target platforms.
-
-## Phase 8: Documentation and :help text (30–45 minutes)
-
-- Document:
-    - Submission model (EOF per OS) and immediate Ctrl-C exit policy.
-    - Streams: stdout for program output; stderr for prompts/meta/errors; :dump options.
-    - Modes and navigation:
-        - Edit mode: Up/Down move within buffer.
-        - History-Browse: Up/Down navigate submissions; Up at (0,0) to enter; Enter accepts; Esc cancels; optional
-          Alt/Ctrl+Up/Down shortcut.
-    - Meta commands with examples: :exit, :help, :reset, :dump [-n|--stderr].
-    - Timeouts and step limits with defaults and configuration knobs.
-
-## Phase 9: Manual QA checklist (20–30 minutes)
-
-- Start REPL, type “+++.” then EOF; verify expected output and prompt returns.
-- After an error, press Up at (0,0) to recall the last submission; browse older ones; Enter accepts; Esc cancels and
-  restores edits.
-- Confirm Up/Down within a multi-line buffer do not trigger history unless at (0,0).
-- Use Left/Right to navigate within lines; insert/delete works.
-- :dump shows buffer; :dump -n adds line numbers; :dump --stderr forces stderr-only; buffer remains intact.
-- :reset clears buffer without affecting history.
-- Run a non-terminating program; verify timeout/step-limit message and prompt returns quickly.
-- Press Ctrl-C during execution; process exits with code 0.
-
-## Clarifications
-
-- :reset — Clears only the current in-memory editing buffer. History is unchanged.
-- :dump — Prints the current buffer for inspection. By default, raw content goes to stdout and framing to stderr; flags
-  modify this. It never alters the buffer or history.
-- History semantics — One history entry per submitted buffer. The “current buffer” is treated as a virtual entry when
-  browsing, so you can return to it via Down or Esc.
-- Stream separation — Interpreter output uses stdout exclusively; REPL/meta use stderr for prompts/help/errors,
-  maintaining clear separation for users and tests.
-
-## Deliverables checklist
-
-- Multiline-capable line editor integrated; correct flush behavior.
-- Multi-modal navigation implemented (Edit and History-Browse) with 0,0 gate and accept/cancel semantics.
-- Session-scoped submission history; Up at empty buffer recalls the last submission.
-- Meta commands: :exit, :help, :reset, :dump (with -n and --stderr).
-- Execution isolation with step limit and wall-clock timeout; clear abort messages.
-- Ctrl-C still exits immediately with code 0.
-- Tests covering meta commands, non-blocking behavior, and mode state machine; manual QA plan for interactive keys.
-- Updated docs and :help text covering navigation, meta commands, and non-blocking policies.
+Decisions locked in
+- TUI-only MVP using your existing library.
+- Pointer wrap-around; 32-cell tape window.
+- , prompts for input; Esc at prompt delivers EOF.
+- Output Raw by default; toggle to Escaped.
+- Use ratatui, crossterm, and reedline.

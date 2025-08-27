@@ -3,6 +3,7 @@ pub mod commands;
 mod reader;
 pub mod repl;
 pub mod theme;
+pub mod tui;
 mod writer;
 
 pub use reader::{BrainfuckReader, BrainfuckReaderError, UnmatchedBracketKind};

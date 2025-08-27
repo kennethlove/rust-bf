@@ -10,6 +10,7 @@ fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
   {0} write [--bytes] [TEXT...]        # Generate Brainfuck to print TEXT/STDIN/file
   {0} write [--bytes] --file <PATH>    # Generate Brainfuck to print file contents
   {0} repl                             # Start a Brainfuck REPL (read-eval-print loop)
+  {0} tui                              # Start a terminal-based Brainfuck IDE
 
 Run "{0} <subcommand> --help" for more info.
 "#,
@@ -35,6 +36,7 @@ enum Command {
     Read(bf::commands::read::ReadArgs),
     Write(bf::commands::write::WriteArgs),
     Repl(bf::commands::repl::ReplArgs),
+    Tui,
 }
 
 fn main() {
@@ -63,6 +65,15 @@ fn main() {
             let code = bf::commands::repl::run(&program, false, mode_flag);
             std::process::exit(code);
         },
+        Some(Command::Tui) => {
+            return match bf::tui::run() {
+                Ok(()) => std::process::exit(0),
+                Err(e) => {
+                    eprintln!("TUI error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
         None => {
             // Default to REPL when no subcommand is provided
             bf::commands::repl::run(&program, false, bf::repl::ModeFlagOverride::None)
