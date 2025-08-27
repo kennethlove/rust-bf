@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 use std::io::{self};
+use std::sync::{mpsc, Arc, Mutex};
+use std::sync::atomic::AtomicBool;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -11,6 +14,9 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Paragraph, Wrap}, Frame, Terminal};
+use crate::{BrainfuckReader, BrainfuckReaderError};
+use crate::reader::StepControl;
+use crate::repl::bf_only;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Focus {
@@ -23,6 +29,37 @@ enum Focus {
 enum OutputMode {
     Raw,
     Escaped,
+}
+
+// Runner wiring: messages and commands between UI and runner
+#[derive(Debug)]
+enum RunnerMsg {
+    // Program produced output bytes (batch as needed)
+    Output(Vec<u8>),
+    // Snapshot of current tape state (ptr index and 32-cell window)
+    Tape { ptr: usize, window: [u8; 32] },
+    // Runner is awaiting input for `,` instruction
+    NeedsInput,
+    // Program finished (Ok) or errored
+    Halted(Result<(), BrainfuckReaderError>),
+}
+
+#[derive(Debug)]
+enum UiCmd {
+    // Provide input byte for `,` instruction; None = EOF
+    ProvideInput(Option<u8>),
+    // Request to stop the program
+    Stop,
+}
+
+struct RunnerHandle {
+    // Send commands to the runner
+    tx_cmd: mpsc::Sender<UiCmd>,
+    // Receive messages from the runner
+    rx_msg: mpsc::Receiver<RunnerMsg>,
+    // Cooperative cancellation flag (also flipped by Stop)
+    cancel: Arc<AtomicBool>,
+    // Join handle is kept in worker (detached); we just hold channels and flag
 }
 
 pub struct App {
@@ -38,6 +75,7 @@ pub struct App {
     // tape pane
     tape_ptr: usize,
     tape_window_offset: isize,
+    tape_window: [u8; 32],
 
     // status
     focused: Focus,
@@ -51,6 +89,9 @@ pub struct App {
 
     // timing
     last_tick: Instant,
+
+    // Runner wiring
+    runner: Option<RunnerHandle>,
 }
 
 impl Default for App {
@@ -63,6 +104,7 @@ impl Default for App {
             output: Vec::new(),
             tape_ptr: 0,
             tape_window_offset: 0,
+            tape_window: [0u8; 32],
             focused: Focus::Editor,
             dirty: false,
             filename: None,
@@ -70,6 +112,7 @@ impl Default for App {
             output_mode: OutputMode::Raw,
             show_help: false,
             last_tick: Instant::now(),
+            runner: None,
         }
     }
 }
@@ -104,7 +147,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> io::Re
             .checked_sub(app.last_tick.elapsed())
             .unwrap_or(Duration::from_secs(0));
 
-        if crossterm::event::poll(timeout)? {
+        if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     if handle_key(&mut app, key)? {
@@ -112,6 +155,37 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> io::Re
                     }
                 }
             }
+        }
+
+        let mut should_clear_runner = false;
+
+        // Drain runner messages without blocking
+        if let Some(handle) = app.runner.as_mut() {
+            while let Ok(msg) = handle.rx_msg.try_recv() {
+                match msg {
+                    RunnerMsg::Output(bytes) => {
+                        app.output.extend_from_slice(&bytes);
+                    }
+                    RunnerMsg::Tape { ptr, window } => {
+                        app.tape_ptr = ptr;
+                        app.tape_window = window;
+                    }
+                    RunnerMsg::NeedsInput => {
+                        // TODO: gather input
+                        let _ = handle.tx_cmd.send(UiCmd::ProvideInput(None));
+                    }
+                    RunnerMsg::Halted(res) => {
+                        app.running = false;
+                        should_clear_runner = true;
+                        let _ = res;
+                    }
+                }
+            }
+        }
+
+        if should_clear_runner {
+            // Now it's safe to clear the runner
+            app.runner = None;
         }
 
         if app.last_tick.elapsed() >= tick_rate {
@@ -217,12 +291,21 @@ fn draw_output(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let text = if app.output.is_empty() {
-        "<no output yet>"
+    let paragraph = if app.output.is_empty() {
+        Paragraph::new("<no output yet>")
     } else {
-        "<output captured>"
+        match app.output_mode {
+            OutputMode::Raw => {
+                // Best-effort: display bytes as UTF-8 (lossy) to avoid panics on invalid UTF-8
+                let s = String::from_utf8_lossy(&app.output);
+                Paragraph::new(s.into_owned())
+            }
+            OutputMode::Escaped => {
+                let s = bytes_to_escaped(&app.output);
+                Paragraph::new(s)
+            }
+        }
     };
-    let paragraph = Paragraph::new(text);
     f.render_widget(paragraph, inner);
 }
 
@@ -246,7 +329,8 @@ fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
             let idx = r * cols + c;
             let abs_idx = ((app.tape_ptr as isize + app.tape_window_offset + idx as isize) % 30_000 + 30_000) % 30_000;
             let is_ptr = idx == 16;
-            let s = format!("[{:02X}]", 0u8);
+            let val = app.tape_window[idx];
+            let s = format!("[{:02X}]", val);
             spans.push(Span::styled(
                 s,
                 Style::default()
@@ -331,7 +415,8 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
                 return Ok(false);
             }
             KeyCode::Char('r') | KeyCode::F(5) => {
-                app.running = true;
+                // Start runner
+                start_runner(app);
                 return Ok(false);
             }
             KeyCode::Char('o') => {
@@ -359,19 +444,28 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
             Ok(false)
         }
         KeyCode::F(5) => {
-            app.running = true;
+            // Start runner
+            start_runner(app);
             Ok(false)
         }
         KeyCode::Char('.') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(h) = app.runner.as_ref() {
+                h.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                let _ = h.tx_cmd.send(UiCmd::Stop);
+            }
             app.running = false;
             Ok(false)
         }
         KeyCode::F(17) /* Shift+F5 */ => {
+            if let Some(h) = app.runner.as_ref() {
+                h.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                let _ = h.tx_cmd.send(UiCmd::Stop);
+            }
             app.running = false;
             Ok(false)
         }
         KeyCode::Tab => {
-            app.focused == match app.focused {
+            app.focused = match app.focused {
                 Focus::Editor => Focus::Output,
                 Focus::Output => Focus::Tape,
                 Focus::Tape => Focus::Editor,
@@ -489,11 +583,6 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Backspace => {
             if app.cursor_col > 0 {
                 let line = &mut app.buffer[app.cursor_row];
-                let byte_idx = nth_char_to_byte_idx(line, app.cursor_col) - {
-                    let prev_byte = nth_char_to_byte_idx(line, app.cursor_col - 1);
-                    nth_char_to_byte_idx(line, app.cursor_col) - prev_byte
-                };
-
                 let prev_byte_idx = nth_char_to_byte_idx(line, app.cursor_col - 1);
                 line.drain(prev_byte_idx..nth_char_to_byte_idx(line, app.cursor_col));
                 app.cursor_col -= 1;
@@ -525,7 +614,8 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char(ch) => {
-            if !is_control_char(ch) {
+            // Only insert when no modifiers are held; avoid inserting on Ctrl/Alt/Shift combos
+            if key.modifiers.is_empty() && !is_control_char(ch) {
                 app.buffer[app.cursor_row].insert(app.cursor_col, ch);
                 app.cursor_col += 1;
                 app.dirty = true;
@@ -706,4 +796,141 @@ fn build_bf_mapping(lines: &[String]) -> Mapping {
         orig_to_bf_idx,
         bf_idx_to_orig,
     }
+}
+
+// Start the Brainfuck runner thread with cooperative cancellation and channels
+fn start_runner(app: &mut App) {
+    // If a runner is already active, ignore
+    if app.runner.is_some() {
+        return;
+    }
+
+    // Prepare source (keep only BF tokens)
+    let source = app_current_source(app);
+    let filtered = bf_only(&source);
+    if filtered.trim().is_empty() {
+        // No BF code to run
+        return;
+    }
+
+    // Channels
+    let (tx_msg, rx_msg) = mpsc::channel::<RunnerMsg>();
+    let (tx_cmd, rx_cmd) = mpsc::channel::<UiCmd>();
+
+    // Cancel flag and step control
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_timer = cancel.clone();
+
+    // Limits from environment
+    let timeout_ms = std::env::var("BF_TIMEOUT_MS").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(2_000);
+    let max_steps = std::env::var("BF_MAX_STEPS").ok().and_then(|s| s.parse::<usize>().ok());
+
+    // Make rx_cmd accessible from callbacks invoked during execution
+    let rx_cmd_shared = Arc::new(Mutex::new(rx_cmd));
+
+    // Spawn worker thread
+    let program = filtered.clone();
+    thread::spawn(move || {
+        // Timer thread: flip cancel after wall-clock timeout
+        let cancel_for_timer = cancel_for_timer.clone();
+        let cancel_clone = cancel_for_timer.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(timeout_ms as u64));
+            cancel_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        // Build the reader and wire callbacks
+        let mut bf = BrainfuckReader::new(program);
+
+        // Output: forward produced bytes to UI
+        let tx_out = tx_msg.clone();
+        bf.set_output_sink(Box::new(move |bytes: &[u8]| {
+            // Send as a batch; UI appends to its buffer
+            let _ = tx_out.send(RunnerMsg::Output(bytes.to_vec()));
+        }));
+
+        // Input: ask UI, block until ProvideInput arrives (or channel closes)
+        let tx_needs_input = tx_msg.clone();
+        let rx_input = rx_cmd_shared.clone();
+        bf.set_input_provider(Box::new(move || {
+            let _ = tx_needs_input.send(RunnerMsg::NeedsInput);
+            // Wait for a ProvideInput command; None if UI side dropped
+            let recv_res = {
+                let lock = rx_input.lock().expect("rx_cmd mutex poisoned");
+                lock.recv()
+            };
+            match recv_res {
+                Ok(UiCmd::ProvideInput(b)) => b,
+                Ok(UiCmd::Stop) => None, // treat Stop as EOF for input
+                Err(_) => None, // channel closed
+            }
+        }));
+
+        // Tape observer: emit 32-cell window snapshots
+        let tx_tape = tx_msg.clone();
+        bf.set_tape_observer(
+            32, // Window size requested from the engine
+            Box::new(move |ptr: usize, window: &[u8]| {
+                // Copy to fixed-size array (truncate/pad as needed)
+                let mut buf = [0u8; 32];
+                let n = window.len().min(32);
+                buf[..n].copy_from_slice(&window[..n]);
+                let _ = tx_tape.send(RunnerMsg::Tape { ptr, window: buf });
+            }),
+        );
+
+        // Run BF with cooperative cancellation
+        let ctrl = StepControl::new(max_steps, cancel_for_timer.clone());
+        let res = {
+            bf.run_with_control(ctrl)
+        };
+
+        // Report completion
+        let _ = tx_msg.send(RunnerMsg::Halted(res));
+    });
+
+    // Save handle in app
+    app.runner = Some(RunnerHandle {
+        tx_cmd,
+        rx_msg,
+        cancel,
+    });
+    app.running = true;
+
+    // Reset previous output buffer for a fresh run
+    app.output.clear();
+}
+
+// Helper: get the current editor buffer as a newline-joined string
+fn app_current_source(app: &App) -> String {
+    if app.buffer.is_empty() {
+        String::new()
+    } else {
+        let mut s = String::new();
+        for (i, line) in app.buffer.iter().enumerate() {
+            if i > 0 {
+                s.push('\n');
+            }
+            s.push_str(line);
+        }
+        s
+    }
+}
+
+// Helper: convert bytes into "escaped" string: printable ASCII as-is, others as \xHH
+fn bytes_to_escaped(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        match b {
+            0x20..=0x7E => out.push(b as char), // Printable ASCII
+            b'\n' => out.push('\n'),
+            b'\r' => out.push('\r'),
+            b'\t' => out.push('\t'),
+            _ => {
+                use std::fmt::Write as _;
+                let _ = write!(&mut out, "\\x{:02X}", b);
+            }
+        }
+    }
+    out
 }

@@ -164,7 +164,7 @@ fn read_submission_interactive(editor: &mut reedline::Reedline) -> io::Result<Op
 }
 
 /// Keep only Brainfuck instruction characters
-fn bf_only(s: &str) -> String {
+pub fn bf_only(s: &str) -> String {
     s.chars()
         .filter(|c| matches!(c, '>' | '<' | '+' | '-' | '.' | ',' | '[' | ']'))
         .collect()
