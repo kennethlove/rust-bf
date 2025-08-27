@@ -109,6 +109,74 @@ Interactive REPL for Brainfuck code execution.
         - add `-n` to print line numbers
         - add `-stderr` to send everything to stderr
 
+### REPL modes and I/O policy
+
+Submission model and Ctrl-C
+- Edit a multi-line buffer; Enter inserts a newline.
+- Submit the buffer by sending EOF:
+    - macOS/Linux: Ctrl-D
+    - Windows: Ctrl-Z then Enter
+- Ctrl-C exits immediately and cleanly with exit code 0 (does not submit the buffer).
+
+Stream separation
+- Program output (produced by your Brainfuck code): stdout only.
+- REPL/meta output (prompt, help, errors, :dump framing): stderr.
+- :dump defaults: content to stdout, framing to stderr; flags can change this (see below).
+
+Modes and navigation
+- Edit mode (default):
+    - Up/Down move within the multi-line buffer.
+    - At the very start of the buffer (row 0, col 0), pressing Up enters History-Browse.
+- History-Browse:
+    - Up/Down navigate past submissions.
+    - Enter accepts the selected entry into the buffer (returns to Edit).
+    - Esc cancels browsing and restores your in-progress edits (returns to Edit).
+    - Shortcuts: Alt-Up/Down and Ctrl-Up/Down also navigate history (when supported by your terminal).
+
+Interactive vs bare mode
+- Auto-detect:
+    - If stdin is a TTY: start the interactive editor REPL.
+    - If stdin is not a TTY (piped/redirected): bare mode — read all input once, execute, exit 0.
+- Flags:
+    - --bare (alias: --non-interactive): force bare mode even on a TTY.
+    - --editor: force interactive mode; on non-TTY stdin prints an error to stderr and exits 1.
+- Prompt suppression: if stderr is not a TTY, prompts/banners are suppressed to keep pipeline output clean.
+
+Timeouts and step limits
+- Defaults (interactive REPL):
+    - Timeout: 2,000 seconds
+    - Max steps: unlimited
+- Configuration:
+    - CLI flags (on the repl command): --timeout <seconds>, --max-steps <steps>
+    - Env vars: BF_REPL_TIMEOUT (seconds), BF_REPL_MAX_STEPS
+    - Precedence: CLI flags > environment variables > defaults
+- Behavior:
+    - If the step limit is exceeded: “Execution aborted: step limit exceeded (N).”
+    - If the timeout is exceeded: “Execution aborted: wall-clock timeout (T s).”
+
+Meta commands (start a line with “:”)
+- :exit — Exit immediately with code 0.
+- :help — Show key bindings, modes, EOF per OS, timeout/step-limit policy, and examples.
+- :reset — Clear the current buffer; history is unchanged.
+- :dump — Print the current buffer for inspection.
+    - Defaults: raw content to stdout; framing markers to stderr.
+    - Flags:
+        - -n — include line numbers (stdout)
+        - --stderr — send everything (content + framing) to stderr
+- Examples:
+    - :dump
+    - :dump -n
+    - :dump --stderr
+
+Key bindings (quick reference)
+- Cursor: Left/Right within a line; Up/Down within the buffer.
+- History-Browse:
+    - Enter at (0,0) after Up: accept history item to buffer.
+    - Esc: leave history, restore your edits.
+    - Up/Down or Alt/Ctrl + Up/Down: move through history.
+- Submission: EOF (Ctrl-D on macOS/Linux; Ctrl-Z then Enter on Windows).
+- Exit: Ctrl-C (immediate), or :exit.
+
 ## Library usage
 
 Add this crate to your workspace or use it via a path dependency. Then:

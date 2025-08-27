@@ -91,10 +91,19 @@ Options:
 Description:
   Starts a REPL where you can enter Brainfuck code and execute it live.
 
+Meta commands (line starts with ":")
+  :exit            Exit immediately (code 0)
+  :help            Show this help
+  :reset           Clear current buffer (history is preserved)
+  :dump            Print buffer (content → stdout; framing → stderr)
+    -n             Include line numbers (stdout)
+    --stderr       Send everything to stderr
+
 Notes:
-    - Ctrl+d executes the current buffer on *nix/macOS.
-    - Ctrl+z and Enter will execute the current buffer on Windows.
-    - Ctrl+c exits the REPL immediately.
+    - While editing, non-Brainfuck characters are ignored; only valid instructions are executed.
+    - Ctrl+D executes the current buffer on *nix/macOS.
+    - Ctrl+Z and Enter will execute the current buffer on Windows.
+    - Ctrl+C exits the REPL immediately.
     - The REPL will print a newline after each execution for readability.
     - Each execution starts with a fresh memory and pointer.
     - The REPL will exit after a single execution if the environment variable `BF_REPL_ONCE` is set to `1`.
@@ -103,6 +112,7 @@ Notes:
         * Env: BF_REPL_MODE=bare|editor overrides auto-detection (flags, when preset, will override env).
         * Auto-detect: if stdin is a TTY, starts in interactive editor mode; otherwise, bare mode.
         * Prompts/banners suppressed if stderr is not a TTY.
+
 "#,
         program
     );
