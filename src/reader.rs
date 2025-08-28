@@ -329,7 +329,7 @@ impl BrainfuckReader {
                 let len = self.memory.len();
                 let half = win_size / 2;
                 let mut start = self.pointer.saturating_sub(half);
-                let mut end = (start + *win_size).min(len);
+                let end = (start + *win_size).min(len);
                 // If we clipped at th end, shift start left to try to fill the window.
                 if end - start < *win_size {
                     start = end.saturating_sub(*win_size);

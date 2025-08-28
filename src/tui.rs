@@ -14,9 +14,8 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Paragraph, Wrap}, Frame, Terminal};
-use crate::{BrainfuckReader, BrainfuckReaderError};
+use crate::{BrainfuckReader, BrainfuckReaderError, bf_only};
 use crate::reader::StepControl;
-use crate::repl::bf_only;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Focus {

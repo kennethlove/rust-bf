@@ -66,7 +66,7 @@ fn main() {
             std::process::exit(code);
         },
         Some(Command::Tui) => {
-            return match bf::tui::run() {
+            match bf::tui::run() {
                 Ok(()) => std::process::exit(0),
                 Err(e) => {
                     eprintln!("TUI error: {e}");

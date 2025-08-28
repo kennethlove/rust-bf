@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use reedline::{Signal, DefaultPrompt, DefaultPromptSegment, HistoryItem, Highlighter, StyledText};
 use nu_ansi_term::Style;
-use crate::{cli_util, BrainfuckReader, BrainfuckReaderError};
+use crate::{cli_util, BrainfuckReader, BrainfuckReaderError, bf_only};
 use crate::reader::StepControl;
 
 pub fn repl_loop() -> io::Result<()> {
@@ -163,12 +163,6 @@ fn read_submission_interactive(editor: &mut reedline::Reedline) -> io::Result<Op
 
 }
 
-/// Keep only Brainfuck instruction characters
-pub fn bf_only(s: &str) -> String {
-    s.chars()
-        .filter(|c| matches!(c, '>' | '<' | '+' | '-' | '.' | ',' | '[' | ']'))
-        .collect()
-}
 
 /// Executes a single Brainfuck program contained in `buffer`.
 /// - Program output goes to stdout.
