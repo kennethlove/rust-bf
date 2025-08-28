@@ -35,8 +35,8 @@ enum OutputMode {
 enum RunnerMsg {
     // Program produced output bytes (batch as needed)
     Output(Vec<u8>),
-    // Snapshot of current tape state (ptr index and 32-cell window)
-    Tape { ptr: usize, window: [u8; 32] },
+    // Snapshot of current tape state (ptr index and 128-cell window)
+    Tape { ptr: usize, window: [u8; 128] },
     // Runner is awaiting input for `,` instruction
     NeedsInput,
     // Program finished (Ok) or errored
@@ -74,7 +74,7 @@ pub struct App {
     // tape pane
     tape_ptr: usize,
     tape_window_offset: isize,
-    tape_window: [u8; 32],
+    tape_window: [u8; 128],
 
     // status
     focused: Focus,
@@ -103,7 +103,7 @@ impl Default for App {
             output: Vec::new(),
             tape_ptr: 0,
             tape_window_offset: 0,
-            tape_window: [0u8; 32],
+            tape_window: [0u8; 128],
             focused: Focus::Editor,
             dirty: false,
             filename: None,
@@ -311,24 +311,30 @@ fn draw_output(f: &mut Frame, area: Rect, app: &App) {
 fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(Span::styled(
-            "Tape (32 cells)",
+            "Tape (128 cells)",
             Style::default().fg(if app.focused == Focus::Tape { Color::Cyan } else { Color::Gray })
         ))
         .borders(Borders::ALL);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let cols = 8usize;
-    let rows = 4usize;
+    let cols = 16usize;
+    let rows = 8usize;
     let mut lines: Vec<Line> = Vec::new();
 
     for r in 0..rows {
         let mut spans: Vec<Span> = Vec::new();
         for c in 0..cols {
             let idx = r * cols + c;
+
+            // Apply view offset by rotating within the 128-cell snapshot
+            let rotated_idx =
+                (idx as isize + app.tape_window_offset).rem_euclid(128) as usize;
+
             let abs_idx = ((app.tape_ptr as isize + app.tape_window_offset + idx as isize) % 30_000 + 30_000) % 30_000;
-            let is_ptr = idx == 16;
-            let val = app.tape_window[idx];
+            let is_ptr = rotated_idx == 64;
+            // let is_ptr = idx == (64isize - app.tape_window_offset).rem_euclid(128) as usize;
+            let val = app.tape_window[rotated_idx];
             let s = format!("[{:02X}]", val);
             spans.push(Span::styled(
                 s,
@@ -336,8 +342,11 @@ fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
                     .fg(if is_ptr { Color::Yellow } else { Color::Gray })
                     .add_modifier(if is_ptr { Modifier::BOLD } else { Modifier::empty() }),
             ));
-            spans.push(Span::raw(" "));
-            let _ = abs_idx;
+
+            // Avoid adding a trailing space after the last column to prevent clipping
+            if c + 1 != cols {
+                spans.push(Span::raw(" "));
+            }
         }
         lines.push(Line::from(spans));
     }
@@ -865,14 +874,14 @@ fn start_runner(app: &mut App) {
             }
         }));
 
-        // Tape observer: emit 32-cell window snapshots
+        // Tape observer: emit 128-cell window snapshots
         let tx_tape = tx_msg.clone();
         bf.set_tape_observer(
-            32, // Window size requested from the engine
+            128, // Window size requested from the engine
             Box::new(move |ptr: usize, window: &[u8]| {
                 // Copy to fixed-size array (truncate/pad as needed)
-                let mut buf = [0u8; 32];
-                let n = window.len().min(32);
+                let mut buf = [0u8; 128];
+                let n = window.len().min(128);
                 buf[..n].copy_from_slice(&window[..n]);
                 let _ = tx_tape.send(RunnerMsg::Tape { ptr, window: buf });
             }),
