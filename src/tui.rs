@@ -36,7 +36,7 @@ enum RunnerMsg {
     // Program produced output bytes (batch as needed)
     Output(Vec<u8>),
     // Snapshot of current tape state (ptr index and 128-cell window)
-    Tape { ptr: usize, window: [u8; 128] },
+    Tape { ptr: usize, base: usize, window: [u8; 128] },
     // Runner is awaiting input for `,` instruction
     NeedsInput,
     // Program finished (Ok) or errored
@@ -73,7 +73,7 @@ pub struct App {
 
     // tape pane
     tape_ptr: usize,
-    tape_window_offset: isize,
+    tape_window_base: usize,
     tape_window: [u8; 128],
 
     // status
@@ -102,7 +102,7 @@ impl Default for App {
             scroll_row: 0,
             output: Vec::new(),
             tape_ptr: 0,
-            tape_window_offset: 0,
+            tape_window_base: 0,
             tape_window: [0u8; 128],
             focused: Focus::Editor,
             dirty: false,
@@ -165,9 +165,11 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> io::Re
                     RunnerMsg::Output(bytes) => {
                         app.output.extend_from_slice(&bytes);
                     }
-                    RunnerMsg::Tape { ptr, window } => {
+                    RunnerMsg::Tape { ptr, base, window } => {
                         app.tape_ptr = ptr;
-                        app.tape_window = window;
+                        app.tape_window_base = base;
+                        app.tape_window.copy_from_slice(&window);
+                        app.dirty = true;
                     }
                     RunnerMsg::NeedsInput => {
                         // TODO: gather input
@@ -309,50 +311,37 @@ fn draw_output(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
+    let border_style = if app.focused == Focus::Tape {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
     let block = Block::default()
-        .title(Span::styled(
-            "Tape (128 cells)",
-            Style::default().fg(if app.focused == Focus::Tape { Color::Cyan } else { Color::Gray })
-        ))
-        .borders(Borders::ALL);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+        .title(Line::raw("Tape (128 cells)"))
+        .borders(Borders::ALL)
+        .border_style(border_style);
 
-    let cols = 16usize;
-    let rows = 8usize;
-    let mut lines: Vec<Line> = Vec::new();
-
-    for r in 0..rows {
-        let mut spans: Vec<Span> = Vec::new();
-        for c in 0..cols {
-            let idx = r * cols + c;
-
-            // Apply view offset by rotating within the 128-cell snapshot
-            let rotated_idx =
-                (idx as isize + app.tape_window_offset).rem_euclid(128) as usize;
-
-            let abs_idx = ((app.tape_ptr as isize + app.tape_window_offset + idx as isize) % 30_000 + 30_000) % 30_000;
-            let is_ptr = rotated_idx == 64;
-            // let is_ptr = idx == (64isize - app.tape_window_offset).rem_euclid(128) as usize;
-            let val = app.tape_window[rotated_idx];
-            let s = format!("[{:02X}]", val);
-            spans.push(Span::styled(
-                s,
-                Style::default()
-                    .fg(if is_ptr { Color::Yellow } else { Color::Gray })
-                    .add_modifier(if is_ptr { Modifier::BOLD } else { Modifier::empty() }),
-            ));
-
-            // Avoid adding a trailing space after the last column to prevent clipping
-            if c + 1 != cols {
-                spans.push(Span::raw(" "));
-            }
-        }
-        lines.push(Line::from(spans));
+    // Build the tape line; content only contains cells, not the title.
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(app.tape_window.len());
+    for (i, byte) in app.tape_window.iter().enumerate() {
+        let abs_idx = app.tape_window_base + i;
+        let cell_text = format!("[{:02X}]", byte);
+        let cell_style = if abs_idx == app.tape_ptr {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(cell_text, cell_style));
     }
 
-    let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, inner);
+    // Enable wrapping within the Tape area and preserve spaces
+    let paragraph = Paragraph::new(Line::from(spans))
+        .wrap(Wrap { trim: false })
+        .block(block);
+
+    f.render_widget(paragraph, area);
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
@@ -513,17 +502,26 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
 
 fn handle_tape_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        KeyCode::Char('[') => {
-            app.tape_window_offset -= 1;
+        // Page to previous/next 128-cell chunk
+        KeyCode::Char('[') | KeyCode::Left | KeyCode::PageUp => {
+            let page = 128usize;
+            let new_base = app.tape_window_base.saturating_sub(page);
+            if new_base != app.tape_window_base {
+                app.tape_window_base = new_base;
+                app.dirty = true;
+            }
         }
-        KeyCode::Char(']') => {
-            app.tape_window_offset += 1;
+        KeyCode::Char(']') | KeyCode::Right | KeyCode::PageDown => {
+            let page = 128usize;
+            // avoid overflow / beyond memory size; if you have memory size available, clamp to it
+            app.tape_window_base = app.tape_window_base.saturating_add(page);
+            app.dirty = true;
         }
-        KeyCode::Left => {
-            app.tape_ptr = app.tape_ptr.wrapping_sub(1) % 30_000;
-        }
-        KeyCode::Right => {
-            app.tape_ptr = (app.tape_ptr + 1) % 30_000;
+        // Center current pointer into its page
+        KeyCode::Char('c') if key.modifiers.is_empty() => {
+            let page = 128usize;
+            app.tape_window_base = app.tape_ptr - (app.tape_ptr % page);
+            app.dirty = true;
         }
         _ => {}
     }
@@ -877,14 +875,15 @@ fn start_runner(app: &mut App) {
         // Tape observer: emit 128-cell window snapshots
         let tx_tape = tx_msg.clone();
         bf.set_tape_observer(
-            128, // Window size requested from the engine
-            Box::new(move |ptr: usize, window: &[u8]| {
-                // Copy to fixed-size array (truncate/pad as needed)
-                let mut buf = [0u8; 128];
-                let n = window.len().min(128);
-                buf[..n].copy_from_slice(&window[..n]);
-                let _ = tx_tape.send(RunnerMsg::Tape { ptr, window: buf });
-            }),
+            128, { // Window size requested from the engine
+                let tx = tx_msg.clone();
+                move |ptr, base, window| {
+                    // copy to fixed array expected by UI
+                    let mut buf = [0u8; 128];
+                    buf[..window.len().min(128)].copy_from_slice(&window[..window.len().min(128)]);
+                    let _ = tx.send(RunnerMsg::Tape { ptr, base, window: buf });
+                }
+            }
         );
 
         // Run BF with cooperative cancellation

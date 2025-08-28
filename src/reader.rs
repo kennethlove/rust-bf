@@ -100,8 +100,8 @@ pub struct BrainfuckReader {
     // Optional hooks:
     output_sink: Option<Box<dyn Fn(&[u8]) + Send + Sync>>,
     input_provider: Option<Box<dyn Fn() -> Option<u8> + Send + Sync>>,
-    // (window_size, observer)
-    tape_observer: Option<(usize, Box<dyn Fn(usize, &[u8]) + Send + Sync>)>,
+    // (window_size, observer (ptr, base, window_slice))
+    tape_observer: Option<(usize, Box<dyn Fn(usize, usize, &[u8]) + Send + Sync>)>,
 }
 
 impl BrainfuckReader {
@@ -150,12 +150,12 @@ impl BrainfuckReader {
     }
 
     /// Provide a tape observer and desired window size.
-    /// After every executed instruction, the observer is called with:
-    /// - current pointer index
-    /// - a window slice of memory around the pointer (clipped to bounds)
     pub fn set_tape_observer<F>(&mut self, window_size: usize, observer: F)
     where
-        F: Fn(usize, &[u8]) + Send + Sync + 'static,
+        // ptr: absolute data pointer
+        // base: start index of the window slice (page-aligned)
+        // window: slice view of memory[base..base+window_size]
+        F: Fn(usize, usize, &[u8]) + Send + Sync + 'static,
     {
         self.tape_observer = Some((window_size.max(1), Box::new(observer)));
     }
@@ -326,16 +326,9 @@ impl BrainfuckReader {
 
             // Notify tape observer (if any) after applying the instruction's effect.
             if let Some((win_size, observer)) = self.tape_observer.as_ref() {
-                let len = self.memory.len();
-                let half = win_size / 2;
-                let mut start = self.pointer.saturating_sub(half);
-                let end = (start + *win_size).min(len);
-                // If we clipped at th end, shift start left to try to fill the window.
-                if end - start < *win_size {
-                    start = end.saturating_sub(*win_size);
-                }
-                let window = &self.memory[start..end];
-                (observer)(self.pointer, window);
+                let base = self.pointer.saturating_sub(self.pointer % *win_size);
+                let end = (base + *win_size).min(self.memory.len());
+                (observer)(self.pointer, base, &self.memory[base..end]);
             }
 
             if debug {
