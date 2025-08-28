@@ -14,6 +14,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Paragraph, Wrap}, Frame, Terminal};
+use ratatui::widgets::{Cell, Row, Table};
 use crate::{BrainfuckReader, BrainfuckReaderError, bf_only};
 use crate::reader::StepControl;
 
@@ -222,7 +223,7 @@ fn ui(f: &mut Frame, app: &App) {
     // Left: editor (top), output (bottom)
     let left_rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(8)].as_ref())
+        .constraints([Constraint::Min(2), Constraint::Length(3)].as_ref())
         .split(left);
 
     let editor_area = left_rows[0];
@@ -321,27 +322,76 @@ fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(border_style);
 
-    // Build the tape line; content only contains cells, not the title.
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(app.tape_window.len());
-    for (i, byte) in app.tape_window.iter().enumerate() {
-        let abs_idx = app.tape_window_base + i;
-        let cell_text = format!("[{:02X}]", byte);
-        let cell_style = if abs_idx == app.tape_ptr {
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default()
-        };
-        spans.push(Span::styled(cell_text, cell_style));
+    // Compute inner area to estimate available width/height for the table
+    let inner = block.inner(area);
+
+    // "Responsive" grid sizing
+    // Each cell renders like "[XX]" (4 chars). We give it width 4 and 1 column space between cells
+    let cell_content_width: u16 = 4;
+    let column_spacing: u16 = 1;
+
+    let max_columns_by_width = if inner.width == 0 {
+        1
+    } else {
+        // columns * cell_content_width + (columns - 1) * column_spacing <= inner.width
+        let denom = cell_content_width + column_spacing;
+        ((inner.width + column_spacing) / denom).max(1)
+    } as usize;
+
+    let mut cols = (inner.width / cell_content_width).max(1) as usize;
+    cols = cols.min(128);
+    if cols == 0 { cols = 1; }
+
+    let rows = ((128 + cols - 1) / cols).max(1);
+
+    // Build rows
+    let mut table_rows: Vec<Row> = Vec::with_capacity(rows);
+    for r in 0..rows {
+        let mut cells: Vec<Cell> = Vec::with_capacity(cols + 1);
+        for c in 0..cols {
+            let idx = r * cols + c;
+            if idx < 128 {
+                let byte = app.tape_window[idx];
+                let abs_idx = app.tape_window_base + idx;
+
+                let mut style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD);
+                if byte > 0 {
+                    style = style.fg(Color::White);
+                }
+
+                if abs_idx == app.tape_ptr {
+                    style = style.fg(Color::Yellow);
+                }
+
+                cells.push(Cell::from(format!("[{byte:02X}]")).style(style));
+            } else {
+                // Pad remaining cells in the last row to keep grid aligned
+                cells.push(Cell::from("    "));
+            }
+
+        }
+        table_rows.push(Row::new(cells));
     }
 
-    // Enable wrapping within the Tape area and preserve spaces
-    let paragraph = Paragraph::new(Line::from(spans))
-        .wrap(Wrap { trim: false })
-        .block(block);
+    // Constraints
+    // - First cols - columns are fixed width
+    // - Last column expands by the exact leftover (ignoring spacing)
+    let base_width_no_spacing = (cols as u16) * cell_content_width;
+    let leftover_no_spacing = inner.width.saturating_sub(base_width_no_spacing);
 
-    f.render_widget(paragraph, area);
+    // Column width constraints for the table
+    let mut constraints: Vec<Constraint> =
+        std::iter::repeat(Constraint::Length(cell_content_width))
+            .take(cols.saturating_sub(1))
+            .collect();
+
+    let last_width = cell_content_width + leftover_no_spacing;
+    constraints.push(Constraint::Length(last_width));
+
+    let table = Table::new(table_rows, constraints)
+        .block(block)
+        .column_spacing(0);
+    f.render_widget(table, area);
 }
 
 fn draw_status(f: &mut Frame, area: Rect, app: &App) {
