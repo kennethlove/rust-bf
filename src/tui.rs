@@ -201,7 +201,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> io::Re
 fn ui(f: &mut Frame, app: &App) {
     let size = f.area();
 
-    // Root: vertical layout -> main area + status bar
+    // Root: vertical layout -> editor + status bar
     let root = Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
@@ -209,21 +209,35 @@ fn ui(f: &mut Frame, app: &App) {
         .split(size);
 
     let main_area = root[0];
-    let status_area = root[1];
+    let status_bar = root[1];
 
     // Main area: two columns (left, right)
+    // Right (Tape) is fixed to 25% of the width; Left gets the remaining 75%
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
+        .constraints([Constraint::Percentage(75), Constraint::Percentage(25)].as_ref())
         .split(main_area);
 
     let left = cols[0];
     let right = cols[1];
 
+    // Determine output height
+    // - Use as few lines as required by the current output (count lines)
+    // - Add 2 for the output block borders
+    // - Cap to at most 50% of the available vertical space
+    // - Ensure a minimal height (3 rows including borders) so the block is visible
+    let output_inner_lines: u16 = output_display_lines(app);
+    let output_block_height: u16 = output_inner_lines.saturating_add(2);
+    let max_output_block_height: u16 = (main_area.height / 2).max(3);
+    let desired_output_block_height: u16 = output_block_height
+        .min(max_output_block_height)
+        .max(3);
+
     // Left: editor (top), output (bottom)
+    // Editor takes the rest, Output gets the computed fixed height
     let left_rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(2), Constraint::Length(3)].as_ref())
+        .constraints([Constraint::Min(1), Constraint::Length(desired_output_block_height)].as_ref())
         .split(left);
 
     let editor_area = left_rows[0];
@@ -232,7 +246,7 @@ fn ui(f: &mut Frame, app: &App) {
     draw_editor(f, editor_area, app);
     draw_output(f, output_area, app);
     draw_tape(f, right, app);
-    draw_status(f, status_area, app);
+    draw_status(f, status_bar, app);
 
     if app.show_help {
         draw_help_overlay(f, size);
@@ -990,4 +1004,24 @@ fn bytes_to_escaped(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+fn output_display_lines(app: &App) -> u16 {
+    if app.output.is_empty() {
+        return 1;
+    }
+    let line_count = match app.output_mode {
+        OutputMode::Raw => {
+            let s = String::from_utf8_lossy(&app.output);
+            let n = s.lines().count();
+            n.max(1)
+        }
+        OutputMode::Escaped => {
+            let s = bytes_to_escaped(&app.output);
+            let n = s.lines().count();
+            n.max(1)
+        }
+    };
+
+    line_count as u16
 }
