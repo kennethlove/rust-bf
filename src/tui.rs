@@ -108,6 +108,9 @@ pub struct App {
     show_confirm_dialog: bool,
     confirm_message: String,
     confirm_pending_open: Option<PathBuf>,
+
+    // Last status message (auto-expires)
+    status_message: Option<(String, Instant)>,
 }
 
 impl Default for App {
@@ -141,6 +144,8 @@ impl Default for App {
             show_confirm_dialog: false,
             confirm_message: String::new(),
             confirm_pending_open: None,
+
+            status_message: None,
         }
     }
 }
@@ -181,7 +186,7 @@ fn run_app(
     if let Some(path) = initial_file {
         if let Err(err) = app_open_file(&mut app, &path) {
             // If opening fails, leave app in default state
-            // TODO: add status messaging
+            set_status(&mut app, &format!("Failed to open {}: {}", path.display(), err));
             eprintln!("Failed to open {}: {}", path.display(), err);
         }
     }
@@ -205,6 +210,11 @@ fn run_app(
 
         let mut should_clear_runner = false;
 
+        // We store deferred actions here
+        let mut deferred_status: Option<String> = None;
+        let mut deferred_send_auto_eof: bool = false;
+        let mut saw_halted: bool = false;
+
         // Drain runner messages without blocking
         if let Some(handle) = app.runner.as_mut() {
             while let Ok(msg) = handle.rx_msg.try_recv() {
@@ -219,25 +229,50 @@ fn run_app(
                         app.dirty = true;
                     }
                     RunnerMsg::NeedsInput => {
-                        // TODO: gather input
-                        let _ = handle.tx_cmd.send(UiCmd::ProvideInput(None));
+                        deferred_send_auto_eof = true;
+                        deferred_status = Some("Program requested input (auto-EOF sent)".to_string());
                     }
                     RunnerMsg::Halted(res) => {
                         app.running = false;
                         should_clear_runner = true;
-                        let _ = res;
+                        saw_halted = true;
+                        match res {
+                            Ok(()) => {
+                                deferred_status = Some("Program finished".to_string());
+                            }
+                            Err(e) => {
+                                deferred_status = Some(format!("Error: {}", e));
+                            }
+                        }
                     }
                 }
             }
         }
 
-        if should_clear_runner {
+        // Now, with no active mutable borrow of app.runner, perform deferred actions
+        if deferred_send_auto_eof {
+            if let Some(h) = app.runner.as_ref() {
+                let _ = h.tx_cmd.send(UiCmd::ProvideInput(None));
+            }
+        }
+        if let Some(msg) = deferred_status.take() {
+            set_status(&mut app, &msg);
+        }
+
+        if should_clear_runner || saw_halted {
             // Now it's safe to clear the runner
             app.runner = None;
         }
 
         if app.last_tick.elapsed() >= tick_rate {
             app.last_tick = Instant::now();
+
+            // Expire status messages after 5 seconds
+            if let Some((_, since)) = app.status_message.as_ref() {
+                if since.elapsed() >= Duration::from_secs(5) {
+                    app.status_message = None;
+                }
+            }
         }
     }
 
@@ -465,9 +500,18 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         OutputMode::Raw => "Raw",
         OutputMode::Escaped => "Esc",
     };
+    let cell_val = current_cell_value(app)
+        .map(|v| format!("{v}"))
+        .unwrap_or_else(|| "--".to_string());
+    let msg = app
+        .status_message
+        .as_ref()
+        .map(|(m, _)| m.as_str())
+        .unwrap_or("");
+
     let status = format!(
-        " {}{} | {} | Ptr: {} | Cell: -- | Output: {} | F1 for Help ",
-        filename, dirty, run_state, app.tape_ptr, output_mode
+        " {}{} | {} | Ptr: {} | Cell: {} | Output: {} | {} ",
+        filename, dirty, run_state, app.tape_ptr, cell_val, output_mode, msg
     );
     let block = Block::default().borders(Borders::TOP);
     f.render_widget(block, area);
@@ -499,8 +543,13 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::raw("Tab/Shift+Tab: Switch pane focus"),
         Line::raw("Ctrl+E: Toggle output mode (Raw/Esc)"),
         Line::raw("F1/Ctrl+H: Toggle this help"),
+        Line::raw(""),
         Line::raw("Editor: Arrows, PageUp/PageDown, Home/End, typing, Enter, Backspace"),
         Line::raw("Tape pane: [ and ] to shift window"),
+        Line::raw(""),
+        Line::raw("Input on ',': prompts for input; Esc at prompt sends EOF"),
+        Line::raw("Output Raw mode may render control bytes; switch to Escaped mode if your terminal glitches"),
+        Line::raw(""),
         Line::raw("Ctrl+q/Esc: Quit"),
     ];
 
@@ -728,7 +777,6 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
         handle_confirm_dialog_key(app, key)?;
         return Ok(false);
     }
-
 
     // Global keys
     if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -1160,6 +1208,7 @@ fn start_runner(app: &mut App) {
     let filtered = bf_only(&source);
     if filtered.trim().is_empty() {
         // No BF code to run
+        set_status(app, "Nothing to run");
         return;
     }
 
@@ -1249,6 +1298,7 @@ fn start_runner(app: &mut App) {
 
     // Reset previous output buffer for a fresh run
     app.output.clear();
+    set_status(app, "Running...");
 }
 
 // Helper: get the current editor buffer as a newline-joined string
@@ -1326,6 +1376,8 @@ fn app_open_file(app: &mut App, path: &Path) -> io::Result<()> {
     app.tape_ptr = 0;
     app.tape_window_base = 0;
     app.tape_window = [0u8; 128];
+
+    set_status(app, &format!("Opened {}", path.display()));
     Ok(())
 }
 
@@ -1348,6 +1400,7 @@ fn app_save_current(app: &mut App) -> io::Result<()> {
     // Ensure parent directory exists or let fs::write return an error
     fs::write(Path::new(filename), content)?;
     app.dirty = false;
+    set_status(app, &format!("Saved {}", filename));
     Ok(())
 }
 
@@ -1408,11 +1461,13 @@ fn handle_save_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
             } else {
                 match save_to_filename(app, &name) {
                     Ok(_) => {
+                        set_status(app, &format!("Saved {}", name));
                         app.show_save_dialog = false;
                         app.save_error = None;
                     }
                     Err(err) => {
                         app.save_error = Some(format!("Save failed: {}", err));
+                        set_status(app, "Save failed");
                     }
                 }
             }
@@ -1467,6 +1522,7 @@ fn handle_open_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
                         }
                         Err(err) => {
                             app.open_error = Some(format!("Open failed: {}", err));
+                            set_status(app, "Open failed");
                         }
                     }
                 }
@@ -1506,6 +1562,7 @@ fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
                         app.open_error = Some(format!("Open failed: {}", err));
                         app.show_confirm_dialog = false;
                         app.show_open_dialog = true;
+                        set_status(app, "Open failed");
                     }
                 }
             } else {
@@ -1527,4 +1584,21 @@ fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+// Compute current cell value if the pointer is within the current 128-cell window
+fn current_cell_value(app: &App) -> Option<u8> {
+    let base = app.tape_window_base;
+    let end = base.saturating_add(128);
+    if app.tape_ptr >= base && app.tape_ptr < end {
+        let idx = app.tape_ptr - base;
+        Some(app.tape_window[idx])
+    } else {
+        None
+    }
+}
+
+// Helper: set a status message
+fn set_status(app: &mut App, status: &str) {
+    app.status_message = Some((status.to_string(), Instant::now()));
 }
