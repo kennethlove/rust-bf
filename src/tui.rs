@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::io::{self};
 use std::sync::{mpsc, Arc, Mutex};
 use std::sync::atomic::AtomicBool;
-use std::thread;
+use std::{fs, thread};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -118,6 +119,12 @@ impl Default for App {
 }
 
 pub fn run() -> io::Result<()> {
+    // For backwards compatibility, delegate to run_with_file(None)
+    run_with_file(None)
+}
+
+// Entry point that accepts an optional initial file to open
+pub fn run_with_file(initial_file: Option<PathBuf>) -> io::Result<()> {
     // terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -126,7 +133,7 @@ pub fn run() -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let res = run_app(&mut terminal);
+    let res = run_app(&mut terminal, initial_file);
 
     // restore terminal
     disable_raw_mode()?;
@@ -136,9 +143,21 @@ pub fn run() -> io::Result<()> {
     res
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> io::Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    initial_file: Option<PathBuf>,
+) -> io::Result<()> {
     let mut app = App::default();
     let tick_rate = Duration::from_millis(33);
+
+    // If an initial file was provided, attempt to open it
+    if let Some(path) = initial_file {
+        if let Err(err) = app_open_file(&mut app, &path) {
+            // If opening fails, leave app in default state
+            // TODO: add status messaging
+            eprintln!("Failed to open {}: {}", path.display(), err);
+        }
+    }
 
     loop {
         terminal.draw(|f| ui(f, &app))?;
@@ -342,15 +361,6 @@ fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
     // "Responsive" grid sizing
     // Each cell renders like "[XX]" (4 chars). We give it width 4 and 1 column space between cells
     let cell_content_width: u16 = 4;
-    let column_spacing: u16 = 1;
-
-    let max_columns_by_width = if inner.width == 0 {
-        1
-    } else {
-        // columns * cell_content_width + (columns - 1) * column_spacing <= inner.width
-        let denom = cell_content_width + column_spacing;
-        ((inner.width + column_spacing) / denom).max(1)
-    } as usize;
 
     let mut cols = (inner.width / cell_content_width).max(1) as usize;
     cols = cols.min(128);
@@ -485,7 +495,16 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
                 return Ok(false);
             }
             KeyCode::Char('s') => {
-                // Save file (not implemented)
+                // Save current file
+                // TODO: Create file if none, prompt for file name
+
+                match app_save_current(app) {
+                    Ok(_) => { /* saved; dirty cleared */ }
+                    Err(err) => {
+                        // TODO: show status message
+                        eprintln!("Save failed: {}", err);
+                    }
+                }
                 return Ok(false);
             }
             KeyCode::Char('e') => {
@@ -937,7 +956,6 @@ fn start_runner(app: &mut App) {
         }));
 
         // Tape observer: emit 128-cell window snapshots
-        let tx_tape = tx_msg.clone();
         bf.set_tape_observer(
             128, { // Window size requested from the engine
                 let tx = tx_msg.clone();
@@ -1024,4 +1042,40 @@ fn output_display_lines(app: &App) -> u16 {
     };
 
     line_count as u16
+}
+
+// Open a file into the editor buffer
+// Set filename and clear dirty flag on success
+fn app_open_file(app: &mut App, path: &Path) -> io::Result<()> {
+    let content = fs::read_to_string(path)?;
+    // Split preserving empty final line if present
+    let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    app.buffer = lines;
+    app.cursor_row = 0;
+    app.cursor_col = 0;
+    app.scroll_row = 0;
+    app.filename = Some(path.to_string_lossy().to_string());
+    app.dirty = false;
+    Ok(())
+}
+
+// Save the current editor buffer to the existing filename
+// Errors if no filename is set or on I/O errors
+fn app_save_current(app: &mut App) -> io::Result<()> {
+    let filename = match app.filename.as_deref() {
+        Some(p) => p,
+        None => {
+            // No filename set
+            // TODO: prompt for filename
+            return Err(io::Error::new(io::ErrorKind::Other, "No filename set"));
+        }
+    };
+    let content = app_current_source(app);
+    // Ensure parent directory exists or let fs::write return an error
+    fs::write(Path::new(filename), content)?;
+    app.dirty = false;
+    Ok(())
 }

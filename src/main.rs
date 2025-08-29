@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::env;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
@@ -36,7 +37,7 @@ enum Command {
     Read(bf::commands::read::ReadArgs),
     Write(bf::commands::write::WriteArgs),
     Repl(bf::commands::repl::ReplArgs),
-    Tui,
+    Tui(bf::commands::tui::TuiArgs),
 }
 
 fn main() {
@@ -65,14 +66,18 @@ fn main() {
             let code = bf::commands::repl::run(&program, false, mode_flag);
             std::process::exit(code);
         },
-        Some(Command::Tui) => {
-            match bf::tui::run() {
-                Ok(()) => std::process::exit(0),
-                Err(e) => {
-                    eprintln!("TUI error: {e}");
+        Some(Command::Tui(args)) => {
+            let filename = if let Some(filename) = &args.filename {
+                if args.help {
+                    eprintln!("Error: --help cannot be used with --file");
                     std::process::exit(1);
                 }
-            }
+                Some(PathBuf::from(filename))
+            } else {
+                None
+            };
+
+            bf::commands::tui::run(&program, args.help, filename)
         }
         None => {
             // Default to REPL when no subcommand is provided
