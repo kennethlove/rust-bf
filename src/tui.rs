@@ -15,7 +15,7 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span}, widgets::{Block, Borders, Paragraph, Wrap}, Frame, Terminal};
-use ratatui::widgets::{Cell, Row, Table};
+use ratatui::widgets::{Cell, Clear, Row, Table};
 use crate::{BrainfuckReader, BrainfuckReaderError, bf_only};
 use crate::reader::StepControl;
 
@@ -93,6 +93,11 @@ pub struct App {
 
     // Runner wiring
     runner: Option<RunnerHandle>,
+
+    // Save dialog
+    show_save_dialog: bool,
+    save_name_input: String,
+    save_error: Option<String>,
 }
 
 impl Default for App {
@@ -114,6 +119,9 @@ impl Default for App {
             show_help: false,
             last_tick: Instant::now(),
             runner: None,
+            show_save_dialog: false,
+            save_name_input: String::new(),
+            save_error: None,
         }
     }
 }
@@ -144,7 +152,7 @@ pub fn run_with_file(initial_file: Option<PathBuf>) -> io::Result<()> {
 }
 
 fn run_app(
-    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     initial_file: Option<PathBuf>,
 ) -> io::Result<()> {
     let mut app = App::default();
@@ -269,6 +277,9 @@ fn ui(f: &mut Frame, app: &App) {
 
     if app.show_help {
         draw_help_overlay(f, size);
+    }
+    if app.show_save_dialog {
+        draw_save_dialog(f, size, app);
     }
 }
 
@@ -458,25 +469,110 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
     f.render_widget(block, rect);
 
     let text = vec![
-        Line::raw("F5/Ctrl+R: Run  Shift+F5/Ctrl+.: Stop"),
+        Line::raw("F5/Ctrl+R: Run"),
         Line::raw("Ctrl+O: Open  Ctrl+S: Save"),
         Line::raw("Tab/Shift+Tab: Switch pane focus"),
         Line::raw("Ctrl+E: Toggle output mode (Raw/Esc)"),
         Line::raw("F1/Ctrl+H: Toggle this help"),
         Line::raw("Editor: Arrows, PageUp/PageDown, Home/End, typing, Enter, Backspace"),
-        Line::raw("Tape pane: [ and ] to shift window; Left/Right to move highlight"),
-        Line::raw("q/Esc: Quit"),
+        Line::raw("Tape pane: [ and ] to shift window"),
+        Line::raw("Ctrl+q/Esc: Quit"),
     ];
+
     let inner = Rect {
         x: rect.x + 2,
         y: rect.y + 2,
         width: rect.width.saturating_sub(4),
         height: rect.height.saturating_sub(4),
     };
+
     f.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), inner);
 }
 
+fn draw_save_dialog(f: &mut Frame, area: Rect, app: &App) {
+    // Content to display
+    let title = "Save As";
+    let prompt = "Enter file name (Esc to cancel):";
+    let input_line = format!("> {}", app.save_name_input);
+    let err_line = app.save_error.as_deref().unwrap_or("");
+
+    // Compute minimal dialog size based on content
+    let mut longest = prompt.len().max(input_line.len()).max(title.len());
+    if !err_line.is_empty() {
+        longest = longest.max(err_line.len());
+    }
+
+    // Borders add 2 columns; add a tiny horizontal padding of 1 char per side
+    let horizontal_padding = 2u16;
+    let min_w = 10u16;
+    let max_w = area.width.saturating_sub(2);
+    let w = ((longest as u16) + 2 /* borders */ + horizontal_padding).clamp(min_w, max_w);
+
+    // Lines:
+    // - 1: prompt
+    // - 2: input
+    // - 3: error(optional)
+
+    let base_lines = 2u16;
+    let lines = base_lines + if err_line.is_empty() { 0 } else { 1 };
+    // Borders add 2 rows; add a tiny vertical padding of 0 (keep minimal)
+    let min_h = 4u16;
+    let max_h = area.height.saturating_sub(2);
+    let h = (lines + 2 /* borders */).clamp(min_h, max_h);
+
+    // Center dialog
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let rect = Rect { x, y, width: w, height: h };
+
+    // Ensure a solid background and then draw the block
+    f.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .title(Span::styled(title, Style::default().fg(Color::White)))
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black));
+    f.render_widget(block.clone(), rect);
+
+    // Inner area
+    let inner = block.inner(rect);
+
+    // Render content with minimal padding: one leading space
+    let left_pad = " ";
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::raw(format!("{left_pad}{prompt}")));
+    lines.push(Line::raw(format!("{left_pad}{input_line}")));
+    if !err_line.is_empty() {
+        lines.push(Line::from(Span::styled(
+            format!("{left_pad}{err_line}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(Color::Black).fg(Color::White));
+    f.render_widget(paragraph, inner);
+
+    // Show the text cursor at the end of the input line
+    let cursor_x = inner
+        .x
+        .saturating_add(1) // left_pad
+        .saturating_add(2) // "> "
+        .saturating_add(app.save_name_input.len() as u16)
+        .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
+    let cursor_y = inner
+        .y
+        .saturating_add(1) // second rendered line
+        .min(inner.y.saturating_add(area.height.saturating_sub(1)));
+    f.set_cursor_position(Position::new(cursor_x, cursor_y));
+}
 fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
+    // When modal is open, it captures all keys
+    if app.show_save_dialog {
+        handle_save_dialog_key(app, key)?;
+        return Ok(false);
+    }
     // Global keys
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
@@ -496,13 +592,17 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
             }
             KeyCode::Char('s') => {
                 // Save current file
-                // TODO: Create file if none, prompt for file name
-
-                match app_save_current(app) {
-                    Ok(_) => { /* saved; dirty cleared */ }
-                    Err(err) => {
-                        // TODO: show status message
-                        eprintln!("Save failed: {}", err);
+                if app.filename.is_none() {
+                    app.show_save_dialog = true;
+                    app.save_name_input = "untitled.bf".to_string();
+                    app.save_error = None;
+                } else {
+                    match app_save_current(app) {
+                        Ok(_) => { /* saved; dirty cleared */ }
+                        Err(err) => {
+                            // TODO: show status message
+                            eprintln!("Save failed: {}", err);
+                        }
                     }
                 }
                 return Ok(false);
@@ -1065,17 +1165,106 @@ fn app_open_file(app: &mut App, path: &Path) -> io::Result<()> {
 // Save the current editor buffer to the existing filename
 // Errors if no filename is set or on I/O errors
 fn app_save_current(app: &mut App) -> io::Result<()> {
+    let filename_owned: String;
     let filename = match app.filename.as_deref() {
         Some(p) => p,
         None => {
             // No filename set
-            // TODO: prompt for filename
-            return Err(io::Error::new(io::ErrorKind::Other, "No filename set"));
+            let new_path = generate_new_filename()?;
+            let s = new_path.to_string_lossy().to_string();
+            app.filename = Some(s.clone());
+            filename_owned = s;
+            &filename_owned
         }
     };
     let content = app_current_source(app);
     // Ensure parent directory exists or let fs::write return an error
     fs::write(Path::new(filename), content)?;
     app.dirty = false;
+    Ok(())
+}
+
+// Helper: choose a new default filename in the current directory.
+// Tries "untitled.bf", "untitled1.bf", "untitled2.bf", ...
+fn generate_new_filename() -> io::Result<PathBuf> {
+    let base = std::env::current_dir()?;
+    // Start with untitled.bf
+    let stem = "untitled";
+    let ext = "bf";
+
+    let candidates = {
+        let mut p = base.clone();
+        p.push(format!("{stem}.{ext}"));
+        p
+    };
+
+    if !candidates.exists() {
+        return Ok(candidates);
+    }
+
+    // Try with numeric suffixes
+    for i in 1..10_000 {
+        let mut p = base.clone();
+        p.push(format!("{stem}{i}.{ext}"));
+        if !p.exists() {
+            return Ok(p);
+        }
+    }
+
+    // If we ran out of attempts, return an error
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, "Unable to generate new filename"))
+}
+
+// Helper to save to a provided filename (relative or absolute)
+fn save_to_filename(app: &mut App, name: &str) -> io::Result<()> {
+    let mut path = PathBuf::from(name);
+    if path.is_relative() {
+        path = std::env::current_dir()?.join(path);
+    }
+    let content = app_current_source(app);
+    fs::write(&path, content)?;
+    app.filename = Some(path.to_string_lossy().to_string());
+    app.dirty = false;
+    Ok(())
+}
+
+fn handle_save_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            app.show_save_dialog = false;
+            app.save_error = None;
+        }
+        KeyCode::Enter => {
+            let name = app.save_name_input.trim().to_string();
+            if name.is_empty() {
+                app.save_error = Some("File name cannot be empty".to_string());
+            } else {
+                match save_to_filename(app, &name) {
+                    Ok(_) => {
+                        app.show_save_dialog = false;
+                        app.save_error = None;
+                    }
+                    Err(err) => {
+                        app.save_error = Some(format!("Save failed: {}", err));
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            app.save_name_input.pop();
+        }
+        KeyCode::Delete => {
+            // no-op (simple input)
+        }
+        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => {
+            // no-op (simple input)
+        }
+        KeyCode::Char(ch) => {
+            if key.modifiers.is_empty() && !is_control_char(ch) {
+                app.save_name_input.push(ch);
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
