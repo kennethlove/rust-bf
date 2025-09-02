@@ -368,9 +368,13 @@ impl Highlighter for BrainfuckHighlighter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MetaCommand {
+    /// Exit the REPL immediately with code 0
     Exit,
+    /// Show help text
     Help,
+    /// Clear the current editing buffer
     Reset,
+    /// Print the current editing buffer to stdout or stderr
     Dump {
         with_line_numbers: bool,
         all_to_stderr: bool,
