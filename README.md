@@ -201,6 +201,44 @@ IDE for Brainfuck code authoring.
 - Ctrl-H / F1 to show help overlay with keybindings and behaviors.
 - Tab to switch focus between editor, output, and tape panes.
 
+## Color themes
+
+Create the file `~/.config/bf.toml`. Customize with your selected ANSI colors.
+
+Here's the default theme:
+
+```toml
+[colors]
+editor_title_focused = "cyan"        # Editor pane title when focused
+editor_title_unfocused = "gray"      # Editor pane title when unfocused
+gutter_text = "darkgray"             # Gutter (line numbers) text color
+
+output_title_focused = "cyan"        # Output pane title when focused
+output_title_unfocused = "gray"      # Output pane title when unfocused
+
+tape_border_focused = "cyan"         # Tape pane border when focused
+tape_border_unfocused = "gray"       # Tape pane border when unfocused
+tape_cell_empty = "darkgray"         # Empty tape cell (0)
+tape_cell_nonzero = "white"          # Non-zero tape cell
+tape_cell_pointer = "yellow"         # Current cell (pointer)
+
+status_text = "white"                # Status bar text color
+dialog_title = "white"               # Dialog title text color
+dialog_bg = "black"                  # Dialog background color
+dialog_error = "red"                 # Error dialog text color
+dialog_text = "white"                # Dialog normal text color
+help_hint = "gray"                   # Help hint text color
+
+editor_op_right = "cyan"             # '>'
+editor_op_left = "green"             # '<'
+editor_op_inc = "lightgreen"         # '+'
+editor_op_dec = "red"                # '-'
+editor_op_output = "yellow"          # '.'
+editor_op_input = "magenta"          # ','
+editor_op_bracket = "lightmagenta"   # '[' or ']'
+editor_non_bf = "gray"               # non-Brainfuck characters
+```
+
 ## Library usage
 
 Add this crate to your workspace or use it via a path dependency. Then:
