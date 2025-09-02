@@ -1654,6 +1654,11 @@ fn app_open_file(app: &mut App, path: &Path) -> io::Result<()> {
     app.tape_ptr = 0;
     app.tape_window_base = 0;
     app.tape_window = [0u8; 128];
+    
+    // Position cursor at end of the file and ensure it's visible
+    app.cursor_row = app.buffer.len().saturating_sub(1);
+    app.cursor_col = app.buffer[app.cursor_row].chars().count();
+    ensure_cursor_visible(app);
 
     set_status(app, &format!("Opened {}", path.display()));
     Ok(())
