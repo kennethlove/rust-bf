@@ -109,6 +109,11 @@ pub struct App {
     confirm_message: String,
     confirm_pending_open: Option<PathBuf>,
 
+    // Input dialog (for `,` instruction)
+    show_input_dialog: bool,
+    input_buffer: String,
+    input_error: Option<String>,
+
     // Last status message (auto-expires)
     status_message: Option<(String, Instant)>,
 }
@@ -144,6 +149,10 @@ impl Default for App {
             show_confirm_dialog: false,
             confirm_message: String::new(),
             confirm_pending_open: None,
+
+            show_input_dialog: false,
+            input_buffer: String::new(),
+            input_error: None,
 
             status_message: None,
         }
@@ -212,7 +221,6 @@ fn run_app(
 
         // We store deferred actions here
         let mut deferred_status: Option<String> = None;
-        let mut deferred_send_auto_eof: bool = false;
         let mut saw_halted: bool = false;
 
         // Drain runner messages without blocking
@@ -229,7 +237,10 @@ fn run_app(
                         app.dirty = true;
                     }
                     RunnerMsg::NeedsInput => {
-                        deferred_send_auto_eof = true;
+                        // Show input dialog; the runner is blocked until we respond
+                        app.show_input_dialog = true;
+                        app.input_buffer.clear();
+                        app.input_error = None;
                         deferred_status = Some("Program requested input (auto-EOF sent)".to_string());
                     }
                     RunnerMsg::Halted(res) => {
@@ -250,11 +261,6 @@ fn run_app(
         }
 
         // Now, with no active mutable borrow of app.runner, perform deferred actions
-        if deferred_send_auto_eof {
-            if let Some(h) = app.runner.as_ref() {
-                let _ = h.tx_cmd.send(UiCmd::ProvideInput(None));
-            }
-        }
         if let Some(msg) = deferred_status.take() {
             set_status(&mut app, &msg);
         }
@@ -340,6 +346,9 @@ fn ui(f: &mut Frame, app: &App) {
     }
     if app.show_confirm_dialog {
         draw_confirm_dialog(f, size, app);
+    }
+    if app.show_input_dialog {
+        draw_input_dialog(f, size, app);
     }
 }
 
@@ -763,6 +772,68 @@ fn draw_confirm_dialog(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, inner);
 }
 
+fn draw_input_dialog(f: &mut Frame, area: Rect, app: &App) {
+    let title = "Program input";
+    let prompt = "Type a byte and press Enter (Esc to send EOF):";
+    let input_line = format!("> {}", app.input_buffer);
+    let err_line = app.input_error.as_deref().unwrap_or("");
+
+    // Compute dialog size
+    let mut longest = prompt.len().max(input_line.len()).max(title.len());
+    if !err_line.is_empty() {
+        longest = longest.max(err_line.len());
+    }
+    let horizontal_padding = 2u16;
+    let min_w = 24u16;
+    let max_w = area.width.saturating_sub(2);
+    let w = ((longest as u16) + 2 + horizontal_padding).clamp(min_w, max_w);
+
+    let base_lines = 2u16;
+    let lines = base_lines + if err_line.is_empty() { 0 } else { 1 };
+    let min_h = 4u16;
+    let max_h = area.height.saturating_sub(2);
+    let h = (lines + 2).clamp(min_h, max_h);
+
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let rect = Rect { x, y, width: w, height: h };
+
+    f.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .title(Span::styled(title, Style::default().fg(Color::White)))
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black));
+    f.render_widget(block.clone(), rect);
+
+    let inner = block.inner(rect);
+    let left_pad = " ";
+    let mut lines_vec: Vec<Line> = Vec::new();
+    lines_vec.push(Line::raw(format!("{left_pad}{prompt}")));
+    lines_vec.push(Line::raw(format!("{left_pad}{input_line}")));
+    if !err_line.is_empty() {
+        lines_vec.push(Line::from(Span::styled(
+            format!("{left_pad}{err_line}"),
+            Style::default().fg(Color::Red),
+        )));
+    }
+
+    let paragraph = Paragraph::new(lines_vec)
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(Color::Black).fg(Color::White));
+    f.render_widget(paragraph, inner);
+
+    // Cursor at end of input line
+    let cursor_x = inner
+        .x
+        .saturating_add(1)
+        .saturating_add(2)
+        .saturating_add(app.input_buffer.len() as u16)
+        .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
+    let cursor_y = inner.y.saturating_add(1);
+    f.set_cursor_position(Position::new(cursor_x, cursor_y));
+}
+
 fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
     // When modal is open, it captures all keys
     if app.show_save_dialog {
@@ -775,6 +846,10 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
     }
     if app.show_confirm_dialog {
         handle_confirm_dialog_key(app, key)?;
+        return Ok(false);
+    }
+    if app.show_input_dialog {
+        handle_input_dialog_key(app, key)?;
         return Ok(false);
     }
 
@@ -1035,6 +1110,174 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
     }
 }
 
+fn handle_save_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            app.show_save_dialog = false;
+            app.save_error = None;
+        }
+        KeyCode::Enter => {
+            let name = app.save_name_input.trim().to_string();
+            if name.is_empty() {
+                app.save_error = Some("File name cannot be empty".to_string());
+            } else {
+                match save_to_filename(app, &name) {
+                    Ok(_) => {
+                        set_status(app, &format!("Saved {}", name));
+                        app.show_save_dialog = false;
+                        app.save_error = None;
+                    }
+                    Err(err) => {
+                        app.save_error = Some(format!("Save failed: {}", err));
+                        set_status(app, "Save failed");
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            app.save_name_input.pop();
+        }
+        KeyCode::Char(ch) => {
+            if key.modifiers.is_empty() && !is_control_char(ch) {
+                app.save_name_input.push(ch);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_open_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            app.show_open_dialog = false;
+            app.open_error = None;
+        }
+        KeyCode::Enter => {
+            let name = app.open_name_input.trim().to_string();
+            if name.is_empty() {
+                app.open_error = Some("Path cannot be empty".to_string());
+            } else {
+                // Resolve to absolute path for consistent filename display
+                let mut path = PathBuf::from(&name);
+                if path.is_relative() {
+                    path = std::env::current_dir()?.join(path);
+                }
+
+                // If there are unsaved changes, ask for confirmation first
+                if app.dirty {
+                    app.confirm_message = "You have unsaved changes. Open anyway? Unsaved changes will be lost.".to_string();
+                    app.confirm_pending_open = Some(path);
+                    app.show_open_dialog = false;
+                    app.show_confirm_dialog = true;
+                } else {
+                    match app_open_file(app, &path) {
+                        Ok(_) => {
+                            app.show_open_dialog = false;
+                            app.open_error = None;
+                        }
+                        Err(err) => {
+                            app.open_error = Some(format!("Open failed: {}", err));
+                            set_status(app, "Open failed");
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            app.open_name_input.pop();
+        }
+        KeyCode::Char(ch) => {
+            if key.modifiers.is_empty() && !is_control_char(ch) {
+                app.open_name_input.push(ch);
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
+    match key.code {
+        KeyCode::Enter => {
+            if let Some(path) = app.confirm_pending_open.take() {
+                // Attempt to open; on error, return to open dialog with error message
+                match app_open_file(app, &path) {
+                    Ok(_) => {
+                        app.show_confirm_dialog = false;
+                        app.open_error = None;
+                        app.show_confirm_dialog = false;
+                    }
+                    Err(err) => {
+                        app.open_error = Some(format!("Open failed: {}", err));
+                        app.show_confirm_dialog = false;
+                        app.show_open_dialog = true;
+                        set_status(app, "Open failed");
+                    }
+                }
+            } else {
+                // No pending action; just close
+                app.show_confirm_dialog = false;
+            }
+
+        }
+        KeyCode::Esc => {
+            // Cancel; return to the open dialog if we came from there
+            app.show_confirm_dialog = false;
+            if app.confirm_pending_open.is_some() {
+                app.show_open_dialog = true;
+            }
+            // Keep the pending path so the user can adjust; or clear it
+            // Clear to avoid accidental reuse
+            app.confirm_pending_open = None;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn handle_input_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            // Send EOF
+            if let Some(h) = app.runner.as_ref() {
+                let _ = h.tx_cmd.send(UiCmd::ProvideInput(None));
+            }
+            app.show_input_dialog = false;
+            app.input_error = None;
+            set_status(app, "Sent EOF");
+        }
+        KeyCode::Enter => {
+            if app.input_buffer.is_empty() {
+                app.input_error = Some("Type a byte or Esc for EOF".to_string());
+            } else {
+                // Take first Unicode scalar's first byte
+                let mut bytes_iter = app.input_buffer.bytes();
+                if let Some(b) = bytes_iter.next() {
+                    if let Some(h) = app.runner.as_ref() {
+                        let _ = h.tx_cmd.send(UiCmd::ProvideInput(Some(b)));
+                    }
+                    app.show_input_dialog = false;
+                    app.input_error = None;
+                    set_status(app, &format!("Sent byte: 0x{:02X}", b));
+                } else {
+                    app.input_error = Some("Invalid input".to_string());
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            app.input_buffer.pop();
+        }
+        KeyCode::Char(ch) => {
+            if key.modifiers.is_empty() && !is_control_char(ch) {
+                app.input_buffer.push(ch);
+                app.input_error = None;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
 fn nth_char_to_byte_idx(s: &str, nth: usize) -> usize {
     if nth == 0 {
         return 0;
@@ -1445,144 +1688,6 @@ fn save_to_filename(app: &mut App, name: &str) -> io::Result<()> {
     fs::write(&path, content)?;
     app.filename = Some(path.to_string_lossy().to_string());
     app.dirty = false;
-    Ok(())
-}
-
-fn handle_save_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
-    match key.code {
-        KeyCode::Esc => {
-            app.show_save_dialog = false;
-            app.save_error = None;
-        }
-        KeyCode::Enter => {
-            let name = app.save_name_input.trim().to_string();
-            if name.is_empty() {
-                app.save_error = Some("File name cannot be empty".to_string());
-            } else {
-                match save_to_filename(app, &name) {
-                    Ok(_) => {
-                        set_status(app, &format!("Saved {}", name));
-                        app.show_save_dialog = false;
-                        app.save_error = None;
-                    }
-                    Err(err) => {
-                        app.save_error = Some(format!("Save failed: {}", err));
-                        set_status(app, "Save failed");
-                    }
-                }
-            }
-        }
-        KeyCode::Backspace => {
-            app.save_name_input.pop();
-        }
-        KeyCode::Delete => {
-            // no-op (simple input)
-        }
-        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down | KeyCode::Home | KeyCode::End => {
-            // no-op (simple input)
-        }
-        KeyCode::Char(ch) => {
-            if key.modifiers.is_empty() && !is_control_char(ch) {
-                app.save_name_input.push(ch);
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn handle_open_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
-    match key.code {
-        KeyCode::Esc => {
-            app.show_open_dialog = false;
-            app.open_error = None;
-        }
-        KeyCode::Enter => {
-            let name = app.open_name_input.trim().to_string();
-            if name.is_empty() {
-                app.open_error = Some("Path cannot be empty".to_string());
-            } else {
-                // Resolve to absolute path for consistent filename display
-                let mut path = PathBuf::from(&name);
-                if path.is_relative() {
-                    path = std::env::current_dir()?.join(path);
-                }
-
-                // If there are unsaved changes, ask for confirmation first
-                if app.dirty {
-                    app.confirm_message = "You have unsaved changes. Open anyway? Unsaved changes will be lost.".to_string();
-                    app.confirm_pending_open = Some(path);
-                    app.show_open_dialog = false;
-                    app.show_confirm_dialog = true;
-                } else {
-                    match app_open_file(app, &path) {
-                        Ok(_) => {
-                            app.show_open_dialog = false;
-                            app.open_error = None;
-                        }
-                        Err(err) => {
-                            app.open_error = Some(format!("Open failed: {}", err));
-                            set_status(app, "Open failed");
-                        }
-                    }
-                }
-            }
-        }
-        KeyCode::Backspace => {
-            app.open_name_input.pop();
-        }
-        KeyCode::Delete => {
-            // no-op (simple input)
-        }
-        KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-            // no-op (simple input)
-        }
-        KeyCode::Char(ch) => {
-            if key.modifiers.is_empty() && !is_control_char(ch) {
-                app.open_name_input.push(ch);
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
-
-fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
-    match key.code {
-        KeyCode::Enter => {
-            if let Some(path) = app.confirm_pending_open.take() {
-                // Attempt to open; on error, return to open dialog with error message
-                match app_open_file(app, &path) {
-                    Ok(_) => {
-                        app.show_confirm_dialog = false;
-                        app.open_error = None;
-                        app.show_confirm_dialog = false;
-                    }
-                    Err(err) => {
-                        app.open_error = Some(format!("Open failed: {}", err));
-                        app.show_confirm_dialog = false;
-                        app.show_open_dialog = true;
-                        set_status(app, "Open failed");
-                    }
-                }
-            } else {
-                // No pending action; just close
-                app.show_confirm_dialog = false;
-            }
-
-        }
-        KeyCode::Esc => {
-            // Cancel; return to the open dialog if we came from there
-            app.show_confirm_dialog = false;
-            if app.confirm_pending_open.is_some() {
-                app.show_open_dialog = true;
-            }
-            // Keep the pending path so the user can adjust; or clear it
-            // Clear to avoid accidental reuse
-            app.confirm_pending_open = None;
-        }
-        _ => {}
-    }
     Ok(())
 }
 
