@@ -1088,7 +1088,7 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char(ch) => {
             // Only insert when no modifiers are held; avoid inserting on Ctrl/Alt/Shift combos
-            if key.modifiers.is_empty() && !is_control_char(ch) {
+            if key.modifiers.is_empty() && !ch.is_control() {
                 app.buffer[app.cursor_row].insert(app.cursor_col, ch);
                 app.cursor_col += 1;
                 app.dirty = true;
@@ -1138,7 +1138,7 @@ fn handle_save_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
             app.save_name_input.pop();
         }
         KeyCode::Char(ch) => {
-            if key.modifiers.is_empty() && !is_control_char(ch) {
+            if key.modifiers.is_empty() && !ch.is_control() {
                 app.save_name_input.push(ch);
             }
         }
@@ -1188,7 +1188,7 @@ fn handle_open_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
             app.open_name_input.pop();
         }
         KeyCode::Char(ch) => {
-            if key.modifiers.is_empty() && !is_control_char(ch) {
+            if key.modifiers.is_empty() && !ch.is_control() {
                 app.open_name_input.push(ch);
             }
         }
@@ -1269,7 +1269,7 @@ fn handle_input_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
             app.input_buffer.pop();
         }
         KeyCode::Char(ch) => {
-            if key.modifiers.is_empty() && !is_control_char(ch) {
+            if key.modifiers.is_empty() && !ch.is_control() {
                 app.input_buffer.push(ch);
                 app.input_error = None;
             }
@@ -1286,10 +1286,6 @@ fn nth_char_to_byte_idx(s: &str, nth: usize) -> usize {
         Some((i, _)) => i,
         None => s.len(),
     }
-}
-
-fn is_control_char(ch: char) -> bool {
-    ch.is_control()
 }
 
 fn ensure_cursor_visible(app: &mut App) {
