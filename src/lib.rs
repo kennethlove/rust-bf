@@ -4,6 +4,7 @@ mod reader;
 pub mod repl;
 pub mod theme;
 pub mod tui;
+pub mod config;
 mod writer;
 
 /// Keep only Brainfuck instruction characters.

@@ -1,6 +1,6 @@
 # rust-bf
 
-A tiny Brainfuck interpreter written in Rust, exposed as both a library and a simple CLI (bf).
+A tiny Brainfuck interpreter written in Rust, exposed as both a library, a reader, a writer, a REPL, and an IDE.
 
 - Memory tape defaults to 30,000 cells initialized to 0
 - Strict pointer bounds (moving left of 0 or beyond the last cell is an error)
@@ -10,6 +10,12 @@ A tiny Brainfuck interpreter written in Rust, exposed as both a library and a si
 - Any non-Brainfuck character results in an error
 - Arithmetic wraps at 8 bits (`u8`) for `+` and `-`
 - Debug mode (`--debug` or `-d`) prints a step-by-step execution table instead of performing I/O
+- Configurable memory size, execution timeout, and step limit
+- Color theme support
+- REPL with multi-line editing, command history, meta-commands, and non-blocking execution
+- Generates Brainfuck code to print given input (text or raw bytes)
+- Comprehensive error handling with descriptive messages
+- Unit and integration tests included
 
 ## Install / Build
 
@@ -37,25 +43,25 @@ Env vars:
 Examples:
 
 - Hello World
-  - `cargo run --bin bf -- read "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.
+  - `cargo run -- read "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.
   ------.--------.>+.>."`
 
 - Echo a single byte from stdin (",.")
-  - `printf 'Z' | cargo run --bin bf -- read ",."`
+  - `printf 'Z' | cargo run -- read ",."`
   - Output: `Z` followed by a newline from the CLI
 
 - Debug mode (prints a table instead of executing I/O)
-  - `cargo run --bin bf -- read --debug ">+.<"`
+  - `cargo run -- read --debug ">+.<"`
   - Useful for understanding control flow; `,` behaves as EOF (cell set to 0) and `.` output is suppressed
 
 - From a file
-  - `cargo run --bin bf -- read --file ./hello.bf`
+  - `cargo run -- read --file ./hello.bf`
 
 - From a file with custom memory size and max steps
-  - `cargo run --bin bf -- read --file ./hello.bf --memory 10000 --max-steps 100000`
+  - `cargo run -- read --file ./hello.bf --memory 10000 --max-steps 100000`
 
 - From a file with a timeout of 2 seconds
-  - `cargo run --bin bf -- read --file ./hello.bf --timeout 2`
+  - `cargo run -- read --file ./hello.bf --timeout 2`
 
 Notes:
 - Non-Brainfuck characters cause an error.
@@ -68,13 +74,13 @@ Generate Brainfuck code that prints the provided input.
 
 Examples:
 - From positional args (recommended with Cargo; note the `--` separator):
-  - `cargo run --bin bf -- write "Hello world"`
+  - `cargo run -- write "Hello world"`
 - From STDIN (UTF-8 text):
   - `echo -n 'Hello' | cargo run --bin bf -- write`
 - From a file:
-  - `cargo run --bin bf -- write --file ./message.txt`
+  - `cargo run -- write --file ./message.txt`
 - Raw bytes from a file:
-  - `cargo run --bin bf -- write --bytes --file ./image.bin`
+  - `cargo run -- write --bytes --file ./image.bin`
 
 The output is Brainfuck code printed to stdout (a trailing newline is added for readability).
 
@@ -83,7 +89,7 @@ The output is Brainfuck code printed to stdout (a trailing newline is added for 
 Interactive REPL for Brainfuck code execution.
 
 - Start the REPL:
-  - `cargo run --bin bf -- repl`
+  - `cargo run -- repl`
 - Type Brainfuck code directly into the REPL.
 - Invalid instructions are ignored.
 - Tape and pointer are reset for each execution. No state is maintained.
@@ -176,6 +182,24 @@ Key bindings (quick reference)
     - Up/Down or Alt/Ctrl + Up/Down: move through history.
 - Submission: EOF (Ctrl-D on macOS/Linux; Ctrl-Z then Enter on Windows).
 - Exit: Ctrl-C (immediate), or :exit.
+
+## CLI usage (IDE)
+
+IDE for Brainfuck code authoring.
+
+- Start the IDE:
+    - `cargo run -- tui`
+    - `cargo run -- tui --file ./example.bf` to open a file on startup
+- Type Brainfuck code directly into the IDE.
+- Invalid instructions are ignored.
+- Tape and pointer are reset for each execution. No state is maintained.
+- Ctrl-R to execute the code buffer.
+- Ctrl-C to exit the IDE immediately with exit code 0.
+- Ctrl-L to toggle line numbers.
+- Ctrl-S to save the current buffer to a file.
+- Ctrl-O to open a file into the current buffer.
+- Ctrl-H / F1 to show help overlay with keybindings and behaviors.
+- Tab to switch focus between editor, output, and tape panes.
 
 ## Library usage
 

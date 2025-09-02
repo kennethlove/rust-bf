@@ -18,6 +18,7 @@ use ratatui::{backend::CrosstermBackend, layout::{Constraint, Direction, Layout,
 use ratatui::widgets::{Cell, Clear, Row, Table};
 use crate::{BrainfuckReader, BrainfuckReaderError, bf_only};
 use crate::reader::StepControl;
+use crate::config::colors;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Focus {
@@ -365,7 +366,7 @@ fn draw_editor(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(Span::styled(
             title,
-            Style::default().fg(if app.focused == Focus::Editor { Color::Cyan } else { Color::Gray }),
+            Style::default().fg(if app.focused == Focus::Editor { colors().editor_title_focused } else { colors().editor_title_unfocused }),
         ))
         .borders(Borders::ALL);
 
@@ -400,7 +401,7 @@ fn draw_editor(f: &mut Frame, area: Rect, app: &App) {
         for (i, _) in app.buffer[start..end].iter().enumerate() {
             let line_no = start + i + 1;
             let s = format!("{:>width$} ", line_no, width = (gutter_width - 1) as usize);
-            glines.push(Line::from(Span::styled(s, Style::default().fg(Color::DarkGray))));
+            glines.push(Line::from(Span::styled(s, Style::default().fg(colors().gutter_text))));
         }
         let gutter = Paragraph::new(glines).wrap(Wrap { trim: false });
         f.render_widget(gutter, gut);
@@ -434,7 +435,7 @@ fn draw_output(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title(Span::styled(
             format!("Output - {mode}"),
-            Style::default().fg(if app.focused == Focus::Output { Color::Cyan } else { Color::Gray }),
+            Style::default().fg(if app.focused == Focus::Output { colors().output_title_focused } else { colors().output_title_unfocused }),
         ))
         .borders(Borders::ALL);
     let inner = block.inner(area);
@@ -460,9 +461,9 @@ fn draw_output(f: &mut Frame, area: Rect, app: &App) {
 
 fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
     let border_style = if app.focused == Focus::Tape {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(colors().tape_border_focused)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(colors().tape_border_unfocused)
     };
     let block = Block::default()
         .title(Line::raw("Tape (128 cells)"))
@@ -492,13 +493,13 @@ fn draw_tape(f: &mut Frame, area: Rect, app: &App) {
                 let byte = app.tape_window[idx];
                 let abs_idx = app.tape_window_base + idx;
 
-                let mut style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD);
+                let mut style = Style::default().fg(colors().tape_cell_empty).add_modifier(Modifier::BOLD);
                 if byte > 0 {
-                    style = style.fg(Color::White);
+                    style = style.fg(colors().tape_cell_nonzero);
                 }
 
                 if abs_idx == app.tape_ptr {
-                    style = style.fg(Color::Yellow);
+                    style = style.fg(colors().tape_cell_pointer);
                 }
 
                 cells.push(Cell::from(format!("[{byte:02X}]")).style(style));
@@ -564,7 +565,7 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         width: area.width.saturating_sub(2),
         height: area.height,
     };
-    let line = Line::from(Span::styled(status, Style::default().fg(Color::White)));
+    let line = Line::from(Span::styled(status, Style::default().fg(colors().status_text)));
     f.render_widget(Paragraph::new(line), inner);
 }
 
