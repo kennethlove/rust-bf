@@ -114,6 +114,9 @@ pub struct App {
     input_buffer: String,
     input_error: Option<String>,
 
+    // Line numbers toggle
+    show_line_numbers: bool,
+
     // Last status message (auto-expires)
     status_message: Option<(String, Instant)>,
 }
@@ -153,6 +156,8 @@ impl Default for App {
             show_input_dialog: false,
             input_buffer: String::new(),
             input_error: None,
+
+            show_line_numbers: true,
 
             status_message: None,
         }
@@ -367,28 +372,57 @@ fn draw_editor(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Prepare highlighted lines within visible window
-    let mut lines: Vec<Line> = Vec::new();
+    // Determine optional gutter for line numbers
+    let show_ln = app.show_line_numbers;
+    let total_lines = app.buffer.len().max(1);
+    let gutter_width = if show_ln {
+        compute_gutter_width(total_lines, 3)
+    } else { 0 };
 
-    let max_lines = (inner.height as usize).saturating_sub(0);
+    // Split inner area into gutter + text content
+    let (gutter_rect, text_rect) = if gutter_width > 0 {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(gutter_width), Constraint::Min(1)])
+            .split(inner);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, inner)
+    };
+
+    let max_lines = text_rect.height as usize;
     let start = app.scroll_row.min(app.buffer.len().saturating_sub(1));
     let end = (start + max_lines).min(app.buffer.len());
 
+    // Render gutter if enabled
+    if let Some(gut) = gutter_rect {
+        let mut glines: Vec<Line> = Vec::with_capacity(end.saturating_sub(start));
+        for (i, _) in app.buffer[start..end].iter().enumerate() {
+            let line_no = start + i + 1;
+            let s = format!("{:>width$} ", line_no, width = (gutter_width - 1) as usize);
+            glines.push(Line::from(Span::styled(s, Style::default().fg(Color::DarkGray))));
+        }
+        let gutter = Paragraph::new(glines).wrap(Wrap { trim: false });
+        f.render_widget(gutter, gut);
+    }
+
+    // Prepare highlighted lines within visible window
+    let mut lines: Vec<Line> = Vec::with_capacity(end.saturating_sub(start));
     for (idx, line) in app.buffer[start..end].iter().enumerate() {
         lines.push(highlight_bf_line(line, app, start + idx));
     }
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-    f.render_widget(paragraph, inner);
+    f.render_widget(paragraph, text_rect);
 
     // Cursor rendering (if editor is focused)
     if app.focused == Focus::Editor {
         let row = app
             .cursor_row
             .saturating_sub(app.scroll_row)
-            .min(inner.height.saturating_sub(1) as usize);
-        let col = app.cursor_col.min(inner.width.saturating_sub(1) as usize);
-        f.set_cursor_position(Position::new(inner.x + col as u16, inner.y + row as u16));
+            .min(text_rect.height.saturating_sub(1) as usize);
+        let col = app.cursor_col.min(text_rect.width.saturating_sub(1) as usize);
+        f.set_cursor_position(Position::new(text_rect.x + col as u16, text_rect.y + row as u16));
     }
 }
 
@@ -1086,6 +1120,11 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
                 app.dirty = true;
             }
         }
+        KeyCode::Char('l') | KeyCode::Char('L') => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                app.show_line_numbers = !app.show_line_numbers;
+            }
+        }
         KeyCode::Char(ch) => {
             // Only insert when no modifiers are held; avoid inserting on Ctrl/Alt/Shift combos
             if key.modifiers.is_empty() && !ch.is_control() {
@@ -1702,4 +1741,12 @@ fn current_cell_value(app: &App) -> Option<u8> {
 // Helper: set a status message
 fn set_status(app: &mut App, status: &str) {
     app.status_message = Some((status.to_string(), Instant::now()));
+}
+
+// Compute gutter width based on total lines. Clamp digits to avoid huge gutters.
+fn compute_gutter_width(total_lines: usize, max_digits: usize) -> u16 {
+    let digits = if total_lines <= 1 { 1 } else {
+        ((total_lines as f64).log10().floor() as usize) + 1
+    }.clamp(2, max_digits);
+    (digits + 1) as u16 // +1 for space after number
 }

@@ -41,6 +41,9 @@ Description:
 Notes:
     - Non-Brainfuck characters are ignored; only valid instructions are executed.
     - Ctrl+R executes the current buffer
+    - Ctrl+S saves the current buffer to a file
+    - Ctrl+O opens a file into the current buffer
+    - Ctrl+L toggles line numbers on/off (on by default)
     - Ctrl+Q exits the IDE immediately.
 "#,
         program
