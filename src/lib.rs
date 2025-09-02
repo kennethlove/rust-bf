@@ -2,7 +2,6 @@ mod cli_util;
 pub mod commands;
 mod reader;
 pub mod repl;
-pub mod theme;
 pub mod tui;
 pub mod config;
 mod writer;
