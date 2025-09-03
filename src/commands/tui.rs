@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 use clap::Args;
-use crate::tui::run_with_file;
+use crate::tui::{run_with_file, run_with_options};
 
 #[derive(Args, Debug)]
 #[command(disable_help_flag = true)]
@@ -9,6 +9,10 @@ pub struct TuiArgs {
     /// Accept a file name to load on startup
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     pub filename: Option<String>,
+    
+    /// Enable Vi mode (default is Emacs mode)
+    #[arg(short = 'v', long = "vi", action = clap::ArgAction::SetTrue)]
+    pub vi_mode: bool,
 
     /// Show this help
     #[arg(short = 'h', long = "help", action = clap::ArgAction::SetTrue)]
@@ -17,11 +21,11 @@ pub struct TuiArgs {
 
 
 // Public entry point for the TUI from main.rs
-pub fn run(program: &str, help: bool, filename: Option<PathBuf>) -> i32 {
+pub fn run(program: &str, help: bool, filename: Option<PathBuf>, vi_mode: bool) -> i32 {
     if help {
         usage_and_exit(program, 0);
     } else {
-        let _ = run_with_file(filename);
+        let _ = run_with_options(filename, vi_mode);
     }
     0
 }
@@ -34,6 +38,7 @@ fn usage_and_exit(program: &str, code: i32) -> ! {
 Options:
   --help,   -h        Show this help
   --file,   -f        Optional file to load on startup
+  --vi,     -v        Enable Vi mode (default is Emacs mode)
 
 Description:
   Starts a terminal IDE where you can enter Brainfuck code and execute it live.

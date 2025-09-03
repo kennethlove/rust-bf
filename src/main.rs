@@ -77,7 +77,7 @@ fn main() {
                 None
             };
 
-            bf::commands::tui::run(&program, args.help, filename)
+            bf::commands::tui::run(&program, args.help, filename, args.vi_mode)
         }
         None => {
             // Default to REPL when no subcommand is provided

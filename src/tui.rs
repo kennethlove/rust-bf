@@ -33,6 +33,13 @@ enum OutputMode {
     Escaped,
 }
 
+// Vi mode state
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ViMode {
+    Insert,
+    Normal,
+}
+
 // Runner wiring: messages and commands between UI and runner
 #[derive(Debug)]
 enum RunnerMsg {
@@ -120,6 +127,11 @@ pub struct App {
 
     // Last status message (auto-expires)
     status_message: Option<(String, Instant)>,
+
+    // Vi mode
+    vi_enabled: bool,
+    vi_mode: ViMode,
+    vi_pending_op: Option<char>,
 }
 
 impl Default for App {
@@ -161,6 +173,10 @@ impl Default for App {
             show_line_numbers: true,
 
             status_message: None,
+
+            vi_enabled: false,
+            vi_mode: ViMode::Insert,
+            vi_pending_op: None,
         }
     }
 }
@@ -172,6 +188,10 @@ pub fn run() -> io::Result<()> {
 
 // Entry point that accepts an optional initial file to open
 pub fn run_with_file(initial_file: Option<PathBuf>) -> io::Result<()> {
+    run_with_options(initial_file, false)
+}
+
+pub fn run_with_options(initial_file: Option<PathBuf>, vi_enabled: bool) -> io::Result<()> {
     // terminal setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -180,7 +200,7 @@ pub fn run_with_file(initial_file: Option<PathBuf>) -> io::Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let res = run_app(&mut terminal, initial_file);
+    let res = run_app(&mut terminal, initial_file, vi_enabled);
 
     // restore terminal
     disable_raw_mode()?;
@@ -193,8 +213,11 @@ pub fn run_with_file(initial_file: Option<PathBuf>) -> io::Result<()> {
 fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     initial_file: Option<PathBuf>,
+    vi_enabled: bool,
 ) -> io::Result<()> {
     let mut app = App::default();
+    app.vi_enabled = vi_enabled;
+    app.vi_mode = if vi_enabled { ViMode::Normal } else { ViMode::Insert };
     let tick_rate = Duration::from_millis(33);
 
     // If an initial file was provided, attempt to open it
@@ -552,10 +575,16 @@ fn draw_status(f: &mut Frame, area: Rect, app: &App) {
         .as_ref()
         .map(|(m, _)| m.as_str())
         .unwrap_or("");
+    let vi_str = if app.vi_enabled {
+        match app.vi_mode {
+            ViMode::Insert => " | Vi: Insert",
+            ViMode::Normal => " | Vi: Normal",
+        }
+    } else { "" };
 
     let status = format!(
-        " {}{} | {} | Ptr: {} | Cell: {} | Output: {} | {} ",
-        filename, dirty, run_state, app.tape_ptr, cell_val, output_mode, msg
+        " {}{} | {} | Ptr: {} | Cell: {} | Output: {}{} | {} ",
+        filename, dirty, run_state, app.tape_ptr, cell_val, output_mode, vi_str, msg
     );
     let block = Block::default().borders(Borders::TOP);
     f.render_widget(block, area);
@@ -581,7 +610,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
     let rect = Rect { x, y, width: w, height: h };
     f.render_widget(block, rect);
 
-    let text = vec![
+    let mut text = vec![
         Line::raw("F5/Ctrl+R: Run"),
         Line::raw("Ctrl+O: Open  Ctrl+S: Save"),
         Line::raw("Tab/Shift+Tab: Switch pane focus"),
@@ -596,6 +625,15 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::raw(""),
         Line::raw("Ctrl+q/Esc: Quit"),
     ];
+
+    // Show quick Vi reference if Vi mode is enabled
+    if tui_has_vi_enabled() {
+        text.push(Line::raw(""));
+        text.push(Line::raw("Vi mode (Normal/Insert) basics:"));
+        text.push(Line::raw("  Normal: h j k l to move, 0/$ line start/end, gg/G top/end"));
+        text.push(Line::raw("  i insert, a append, o/O new line below/above"));
+        text.push(Line::raw("  x delete char, dd delete line, Esc -> Normal"));
+    }
 
     let inner = Rect {
         x: rect.x + 2,
@@ -980,6 +1018,11 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
             Ok(false)
         }
         KeyCode::Esc => {
+            // In Vi mode within editor, Esc leaves Insert -> Normal (or no-op)
+            if app.focused == Focus::Editor && app.vi_enabled {
+                handle_editor_key_vi(app, key);
+                return Ok(false);
+            }
             // Quit when help is open; otherwise quit
             if app.show_help {
                 app.show_help = false;
@@ -990,7 +1033,11 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
         }
         _ => match app.focused {
             Focus::Editor => {
-                handle_editor_key(app, key);
+                if app.vi_enabled {
+                    handle_editor_key_vi(app, key);
+                } else {
+                    handle_editor_key(app, key);
+                }
                 Ok(false)
             },
             Focus::Output => Ok(false), // No keys handled in output pane
@@ -1138,6 +1185,160 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
         _ => {}
     }
 
+    if app.buffer.is_empty() {
+        app.buffer.push(String::new());
+        app.cursor_row = 0;
+        app.cursor_col = 0;
+        app.scroll_row = 0;
+    } else {
+        app.cursor_row = app.cursor_row.min(app.buffer.len() - 1);
+        let cur_len = app.buffer[app.cursor_row].chars().count();
+        app.cursor_col = app.cursor_col.min(cur_len);
+    }
+}
+
+/// Vi-mode aware editor handling
+fn handle_editor_key_vi(app: &mut App, key: KeyEvent) {
+    match app.vi_mode {
+        ViMode::Insert => {
+            // Insert mode: same as regular editor, but Esc returns to Normal
+            if let KeyCode::Esc = key.code {
+                app.vi_mode = ViMode::Normal;
+                app.vi_pending_op = None;
+                return;
+            }
+            handle_editor_key(app, key);
+        }
+        ViMode::Normal => {
+            // Clear pending op unless this is part of a chord
+            let mut consumed = false;
+            match key.code {
+                KeyCode::Char('i') if key.modifiers.is_empty() => {
+                    app.vi_mode = ViMode::Insert;
+                    app.vi_pending_op = None;
+                    consumed = true;
+                }
+                KeyCode::Char('a') if key.modifiers.is_empty() => {
+                    // Append after cursor (move right if possible), then insert
+                    let len = app.buffer[app.cursor_row].chars().count();
+                    if app.cursor_col < len {
+                        app.cursor_col += 1;
+                    }
+                    app.vi_mode = ViMode::Insert;
+                    app.vi_pending_op = None;
+                    consumed = true;
+                }
+                KeyCode::Char('o') if key.modifiers.is_empty() => {
+                    // New line below, move to it, then insert
+                    let next_idx = app.cursor_row + 1;
+                    app.buffer.insert(next_idx, String::new());
+                    app.cursor_row = next_idx;
+                    app.cursor_col = 0;
+                    app.vi_mode = ViMode::Insert;
+                    app.dirty = true;
+                    ensure_cursor_visible(app);
+                    app.vi_pending_op = None;
+                    consumed = true;
+                }
+                KeyCode::Char('O') if key.modifiers.is_empty() => {
+                    // New line above, move to it, then insert
+                    let cur_idx = app.cursor_row;
+                    app.buffer.insert(cur_idx, String::new());
+                    app.cursor_col = 0;
+                    app.dirty = true;
+                    ensure_cursor_visible(app);
+                    app.vi_mode = ViMode::Insert;
+                    app.vi_pending_op = None;
+                    consumed = true;
+                }
+                KeyCode::Char('h') if key.modifiers.is_empty() => {
+                    move_left(app);
+                    consumed = true;
+                }
+                KeyCode::Char('l') if key.modifiers.is_empty() => {
+                    move_right(app);
+                    consumed = true;
+                }
+                KeyCode::Char('j') if key.modifiers.is_empty() => {
+                    move_down(app);
+                    consumed = true;
+                }
+                KeyCode::Char('k') if key.modifiers.is_empty() => {
+                    move_up(app);
+                    consumed = true;
+                }
+                KeyCode::Char('x') if key.modifiers.is_empty() => {
+                    // Delete char under cursor
+                    let len_chars = app.buffer[app.cursor_row].chars().count();
+                    if app.cursor_col < len_chars {
+                        let line = &mut app.buffer[app.cursor_row];
+                        let start = nth_char_to_byte_idx(line, app.cursor_col);
+                        let end = nth_char_to_byte_idx(line, app.cursor_col + 1);
+                        line.drain(start..end);
+                        app.dirty = true;
+                    }
+                    consumed = true;
+                }
+                KeyCode::Char('0') if key.modifiers.is_empty() => {
+                    app.cursor_col = 0;
+                    ensure_cursor_visible(app);
+                    consumed = true;
+                }
+                KeyCode::Char('$') if key.modifiers.is_empty() => {
+                    app.cursor_col = app.buffer[app.cursor_row].chars().count();
+                    ensure_cursor_visible(app);
+                    consumed = true;
+                }
+                KeyCode::Char('d') if key.modifiers.is_empty() => {
+                    if matches!(app.vi_pending_op, Some('d')) {
+                        // dd: delete current line
+                        app.vi_pending_op = None;
+                        delete_current_line(app);
+                    } else {
+                        // Start d operation
+                        app.vi_pending_op = Some('d');
+                    }
+                    consumed = true;
+                }
+                KeyCode::Char('g') if key.modifiers.is_empty() => {
+                    if matches!(app.vi_pending_op, Some('g')) {
+                        // gg: go to top
+                        app.cursor_row = 0;
+                        app.cursor_col = 0;
+                        ensure_cursor_visible(app);
+                        app.vi_pending_op = None;
+                    } else {
+                        // Start g operation
+                        app.vi_pending_op = Some('g');
+                    }
+                    consumed = true;
+                }
+                KeyCode::Char('G') if key.modifiers.is_empty() => {
+                    // End of file
+                    app.cursor_row = app.buffer.len().saturating_sub(1);
+                    app.cursor_col = app.buffer[app.cursor_row].chars().count();
+                    ensure_cursor_visible(app);
+                    consumed = true;
+                }
+                KeyCode::Enter => {
+                    // In Normal mode, Enter: do nothing
+                    consumed = true;
+                }
+                KeyCode::Esc => {
+                    // Already normal; clear pending op
+                    app.vi_pending_op = None;
+                    consumed = true;
+                }
+                _ => {}
+            }
+            if !consumed {
+                // Any other key cancels pending op
+                app.vi_pending_op = None;
+            }
+        }
+    }
+
+    // Clamp and maintain invariants
     if app.buffer.is_empty() {
         app.buffer.push(String::new());
         app.cursor_row = 0;
@@ -1755,4 +1956,66 @@ fn compute_gutter_width(total_lines: usize, max_digits: usize) -> u16 {
         ((total_lines as f64).log10().floor() as usize) + 1
     }.clamp(2, max_digits);
     (digits + 1) as u16 // +1 for space after number
+}
+
+fn tui_has_vi_enabled() -> bool {
+    false
+}
+
+fn move_left(app: &mut App) {
+    if app.cursor_col > 0 {
+        app.cursor_col -= 1;
+    } else if app.cursor_row > 0 {
+        app.cursor_row -= 1;
+        app.cursor_col = app.buffer[app.cursor_row].chars().count().saturating_sub(1);
+    }
+    ensure_cursor_visible(app);
+}
+
+fn move_right(app: &mut App) {
+    let len = app.buffer[app.cursor_row].chars().count();
+    if app.cursor_col + 1 < len {
+        app.cursor_col += 1;
+    } else if app.cursor_row + 1 < app.buffer.len() {
+        app.cursor_row += 1;
+        app.cursor_col = 0;
+    } else {
+        app.cursor_col = len;
+    }
+    ensure_cursor_visible(app);
+}
+
+fn move_up(app: &mut App) {
+    if app.cursor_row > 0 {
+        app.cursor_row -= 1;
+        app.cursor_col = app.cursor_col.min(app.buffer[app.cursor_row].chars().count());
+        ensure_cursor_visible(app);
+    }
+}
+
+fn move_down(app: &mut App) {
+    if app.cursor_row + 1 < app.buffer.len() {
+        app.cursor_row += 1;
+        app.cursor_col = app.cursor_col.min(app.buffer[app.cursor_row].chars().count());
+        ensure_cursor_visible(app);
+    }
+}
+
+fn delete_current_line(app: &mut App) {
+    if app.buffer.len() == 1 {
+        // Keep one empty line
+        if !app.buffer[0].is_empty() {
+            app.buffer[0].clear();
+            app.cursor_col = 0;
+            app.dirty = true;
+        }
+        return;
+    }
+    app.buffer.remove(app.cursor_row);
+    if app.cursor_row >= app.buffer.len() {
+        app.cursor_row = app.buffer.len() - 1;
+    }
+    app.cursor_col = app.buffer[app.cursor_row].chars().count().min(app.cursor_col);
+    app.dirty = true;
+    ensure_cursor_visible(app);
 }
