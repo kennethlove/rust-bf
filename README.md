@@ -127,7 +127,7 @@ Submission model and Ctrl-C
 Stream separation
 - Program output (produced by your Brainfuck code): stdout only.
 - REPL/meta output (prompt, help, errors, :dump framing): stderr.
-- :dump defaults: content to stdout, framing to stderr; flags can change this (see below).
+- `:dump` defaults: content to stdout, framing to stderr; flags can change this (see below).
 
 Modes and navigation
 - Edit mode (default):
@@ -144,8 +144,8 @@ Interactive vs bare mode
     - If stdin is a TTY: start the interactive editor REPL.
     - If stdin is not a TTY (piped/redirected): bare mode — read all input once, execute, exit 0.
 - Flags:
-    - --bare (alias: --non-interactive): force bare mode even on a TTY.
-    - --editor: force interactive mode; on non-TTY stdin prints an error to stderr and exits 1.
+    - `--bare` (alias: `--non-interactive`): force bare mode even on a TTY.
+    - `--editor`: force interactive mode; on non-TTY stdin prints an error to stderr and exits 1.
 - Prompt suppression: if stderr is not a TTY, prompts/banners are suppressed to keep pipeline output clean.
 
 Timeouts and step limits
@@ -161,18 +161,18 @@ Timeouts and step limits
     - If the timeout is exceeded: “Execution aborted: wall-clock timeout (T s).”
 
 Meta commands (start a line with “:”)
-- :exit — Exit immediately with code 0.
-- :help — Show key bindings, modes, EOF per OS, timeout/step-limit policy, and examples.
-- :reset — Clear the current buffer; history is unchanged.
-- :dump — Print the current buffer for inspection.
+- `:exit` — Exit immediately with code 0.
+- `:help` — Show key bindings, modes, EOF per OS, timeout/step-limit policy, and examples.
+- `:reset` — Clear the current buffer; history is unchanged.
+- `:dump` — Print the current buffer for inspection.
     - Defaults: raw content to stdout; framing markers to stderr.
     - Flags:
-        - -n — include line numbers (stdout)
-        - --stderr — send everything (content + framing) to stderr
+        - `-n` — include line numbers (stdout)
+        - `--stderr` — send everything (content + framing) to stderr
 - Examples:
-    - :dump
-    - :dump -n
-    - :dump --stderr
+    - `:dump`
+    - `:dump -n`
+    - `:dump --stderr`
 
 Key bindings (quick reference)
 - Cursor: Left/Right within a line; Up/Down within the buffer.
@@ -193,13 +193,16 @@ IDE for Brainfuck code authoring.
 - Type Brainfuck code directly into the IDE.
 - Invalid instructions are ignored.
 - Tape and pointer are reset for each execution. No state is maintained.
-- Ctrl-R to execute the code buffer.
+- Tab to switch focus between editor, output, and tape panes.
+- Ctrl-R to execute the editor buffer.
 - Ctrl-C to exit the IDE immediately with exit code 0.
 - Ctrl-L to toggle line numbers.
 - Ctrl-S to save the current buffer to a file.
 - Ctrl-O to open a file into the current buffer.
+- Ctrl-N to create a new file (prompts to save if the current buffer is dirty).
+- Ctrl-P to navigate to the matching bracket (if on a `[` or `]`).
+- Ctrl-Q to quit (prompts to save if the current buffer is dirty).
 - Ctrl-H / F1 to show help overlay with keybindings and behaviors.
-- Tab to switch focus between editor, output, and tape panes.
 
 ## Color themes
 
