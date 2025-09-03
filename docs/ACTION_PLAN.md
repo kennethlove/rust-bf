@@ -18,7 +18,7 @@ High-level UX and layout
     - Toggle to switch between raw and escaped display.
     - Input prompt line appears here when , is encountered.
 - Right pane: Tape
-    - Dense 32-cell window around data pointer.
+    - Dense 128-cell window around data pointer.
     - Highlights pointer cell; shows absolute pointer index and current value.
 - Status bar
     - Filename and dirty indicator.
@@ -101,6 +101,30 @@ Output display modes
     - Help overlay (F1) listing keybindings and behaviors.
     - Graceful terminal teardown on exit and on errors.
 
+8. ~~Pane hide/show toggles (optional stretch)~~
+    - Keybindings to hide/show output and tape panes.
+    - Adjust layout dynamically.
+
+9. Improved editor features (optional stretch)
+    - ~~`:clean` command to remove non-BF chars.~~
+    - [x] Line numbers (toggleable?).
+    - [x] Color themes (stretch).
+    - [x] Vi mode (stretch).
+    - [ ] ~~Undo/redo, copy/paste (maybe)~~
+    - [ ] ~~Search within buffer (maybe)~~
+    - [ ] Configurable tape size and cell size (stretch).
+    - [ ] Save as...
+    - [x] Confirm on exit if dirty.
+    - [x] New file (Ctrl+N).
+    - [x] Navigate to matching bracket (e.g., Ctrl+M).
+    - [ ] Step execution (stretch).
+        - `debug`-style output (toggleable) (stretch).
+
+10. Language additions (optional stretch)
+    - [ ] Comments (non-BF chars ignored).
+    - [ ] Breakpoints
+    - [ ] Extended commands (e.g., >8, <8, +10, -10).
+
 Acceptance criteria
 - Can edit, open, and save Brainfuck source files.
 - Run executes the program; Stop halts promptly.
@@ -118,7 +142,7 @@ Testing checklist (manual)
 - File I/O: Open/Save workflows, dirty flag handling, error messages for invalid paths.
 
 Risk management
-- Deadlock on input: ensure runner posts NeedsInput before blocking and UI always responds ProvideInput(Some/None).
+- Deadlock on input: ensure runner posts NeedsInput before blocking, and UI always responds ProvideInput(Some/None).
 - UI overwhelm: batch output and tape updates (by time or instruction count).
 - Raw output control bytes disrupting terminal: provide Escaped mode in help; default to Raw but document the toggle.
 
