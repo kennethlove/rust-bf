@@ -1,4 +1,8 @@
 /target
+/.idea
+/docs
+.DS_Store
+*.bf
 
 
 # START Ruler Generated Files
