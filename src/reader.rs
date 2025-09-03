@@ -15,7 +15,7 @@
 //! Quick start:
 //!
 //! ```no_run
-//! use bf::BrainfuckReader;
+//! use rust_bf::BrainfuckReader;
 //!
 //! // Classic "Hello World!" in Brainfuck
 //! let code = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.";

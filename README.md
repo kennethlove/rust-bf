@@ -1,6 +1,6 @@
 # rust-bf
 
-A tiny Brainfuck interpreter written in Rust, exposed as both a library, a reader, a writer, a REPL, and an IDE.
+A Brainfuck interpreter written in Rust, exposed as a library, a reader, a writer, a REPL, and an IDE.
 
 - Memory tape defaults to 30,000 cells initialized to 0
 - Strict pointer bounds (moving left of 0 or beyond the last cell is an error)
@@ -19,7 +19,13 @@ A tiny Brainfuck interpreter written in Rust, exposed as both a library, a reade
 
 ## Install / Build
 
-You need Rust and Cargo installed.
+To install the CLI tool, you can use Cargo:
+
+```sh
+cargo install --locked rust-bf
+```
+
+If you want to build from source:
 
 - Build: `cargo build`
 - Run tests: `cargo test`
@@ -244,7 +250,7 @@ editor_non_bf = "gray"               # non-Brainfuck characters
 
 ## Library usage
 
-Add this crate to your workspace or use it via a path dependency. Then:
+Add this crate to your project. Then:
 
 ```rust,no_run
 use rust_bf::Brainfuck;
@@ -274,7 +280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Custom memory size
 
-```rust,ignore
+```rust,no_run
 use rust_bf::Brainfuck;
 let mut bf = Brainfuck::new_with_memory(
     "+>+<[->+<]".to_string(),

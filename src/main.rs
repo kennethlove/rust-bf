@@ -11,7 +11,7 @@ fn print_top_usage_and_exit(program: &str, code: i32) -> ! {
   {0} write [--bytes] [TEXT...]        # Generate Brainfuck to print TEXT/STDIN/file
   {0} write [--bytes] --file <PATH>    # Generate Brainfuck to print file contents
   {0} repl                             # Start a Brainfuck REPL (read-eval-print loop)
-  {0} ide                              # Start a terminal-based Brainfuck IDE
+  {0} ide   [--file <PATH>]            # Start a terminal-based Brainfuck IDE, optionally loading a file
 
 Run "{0} <subcommand> --help" for more info.
 "#,
@@ -34,10 +34,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    Read(bf::commands::read::ReadArgs),
-    Write(bf::commands::write::WriteArgs),
-    Repl(bf::commands::repl::ReplArgs),
-    Ide(bf::commands::ide::IdeArgs),
+    Read(rust_bf::commands::read::ReadArgs),
+    Write(rust_bf::commands::write::WriteArgs),
+    Repl(rust_bf::commands::repl::ReplArgs),
+    Ide(rust_bf::commands::ide::IdeArgs),
 }
 
 fn main() {
@@ -51,19 +51,19 @@ fn main() {
     }
 
     let code = match cli.command {
-        Some(Command::Read(args)) => bf::commands::read::run(&program, args),
-        Some(Command::Write(args)) => bf::commands::write::run(&program, args),
+        Some(Command::Read(args)) => rust_bf::commands::read::run(&program, args),
+        Some(Command::Write(args)) => rust_bf::commands::write::run(&program, args),
         Some(Command::Repl(args)) => {
             let program = "repl";
             let mode_flag = if args.bare {
-                bf::repl::ModeFlagOverride::Bare
+                rust_bf::repl::ModeFlagOverride::Bare
             } else if args.editor {
-                bf::repl::ModeFlagOverride::Editor
+                rust_bf::repl::ModeFlagOverride::Editor
             } else {
-                bf::repl::ModeFlagOverride::None
+                rust_bf::repl::ModeFlagOverride::None
             };
             
-            let code = bf::commands::repl::run(&program, false, mode_flag);
+            let code = rust_bf::commands::repl::run(&program, false, mode_flag);
             std::process::exit(code);
         },
         Some(Command::Ide(args)) => {
@@ -77,11 +77,11 @@ fn main() {
                 None
             };
 
-            bf::commands::ide::run(&program, args.help, filename, args.vi_mode)
+            rust_bf::commands::ide::run(&program, args.help, filename, args.vi_mode)
         }
         None => {
             // Default to REPL when no subcommand is provided
-            bf::commands::repl::run(&program, false, bf::repl::ModeFlagOverride::None)
+            rust_bf::commands::repl::run(&program, false, rust_bf::repl::ModeFlagOverride::None)
         }
     };
 
