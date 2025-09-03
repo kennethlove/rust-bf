@@ -1,11 +1,11 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 use clap::Args;
-use crate::tui::{run_with_file, run_with_options};
+use crate::ide::run_with_options;
 
 #[derive(Args, Debug)]
 #[command(disable_help_flag = true)]
-pub struct TuiArgs {
+pub struct IdeArgs {
     /// Accept a file name to load on startup
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     pub filename: Option<String>,
@@ -33,7 +33,7 @@ pub fn run(program: &str, help: bool, filename: Option<PathBuf>, vi_mode: bool) 
 fn usage_and_exit(program: &str, code: i32) -> ! {
     eprintln!(
         r#"Usage:
-  {0} tui   # Start a Brainfuck Terminal IDE (read-eval-print loop)
+  {0} ide   # Start a Brainfuck Terminal IDE (read-eval-print loop)
 
 Options:
   --help,   -h        Show this help
@@ -49,6 +49,8 @@ Notes:
     - Ctrl+S saves the current buffer to a file
     - Ctrl+O opens a file into the current buffer
     - Ctrl+L toggles line numbers on/off (on by default)
+    - Ctrl+N creates a new empty buffer
+    - Ctrl+P jumps to matching bracket
     - Ctrl+Q exits the IDE; if there are unsaved changes, you will be asked to confirm.
 "#,
         program

@@ -188,8 +188,8 @@ Key bindings (quick reference)
 IDE for Brainfuck code authoring.
 
 - Start the IDE:
-    - `cargo run -- tui`
-    - `cargo run -- tui --file ./example.bf` to open a file on startup
+    - `cargo run -- ide`
+    - `cargo run -- ide --file ./example.bf` to open a file on startup
 - Type Brainfuck code directly into the IDE.
 - Invalid instructions are ignored.
 - Tape and pointer are reset for each execution. No state is maintained.
