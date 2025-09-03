@@ -9,7 +9,7 @@ pub struct TuiArgs {
     /// Accept a file name to load on startup
     #[arg(short = 'f', long = "file", value_name = "PATH")]
     pub filename: Option<String>,
-    
+
     /// Enable Vi mode (default is Emacs mode)
     #[arg(short = 'v', long = "vi", action = clap::ArgAction::SetTrue)]
     pub vi_mode: bool,
@@ -49,7 +49,7 @@ Notes:
     - Ctrl+S saves the current buffer to a file
     - Ctrl+O opens a file into the current buffer
     - Ctrl+L toggles line numbers on/off (on by default)
-    - Ctrl+Q exits the IDE immediately.
+    - Ctrl+Q exits the IDE; if there are unsaved changes, you will be asked to confirm.
 "#,
         program
     );

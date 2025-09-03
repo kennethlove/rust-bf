@@ -132,6 +132,10 @@ pub struct App {
     vi_enabled: bool,
     vi_mode: ViMode,
     vi_pending_op: Option<char>,
+
+    // Quit flow
+    should_quit: bool,
+    confirm_pending_quit: bool,
 }
 
 impl Default for App {
@@ -177,6 +181,9 @@ impl Default for App {
             vi_enabled: false,
             vi_mode: ViMode::Insert,
             vi_pending_op: None,
+
+            should_quit: false,
+            confirm_pending_quit: false,
         }
     }
 }
@@ -309,6 +316,9 @@ fn run_app(
                 }
             }
         }
+
+        // Break out if a confirmed quit was requested
+        if app.should_quit { break; }
     }
 
     Ok(())
@@ -929,7 +939,16 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
     // Global keys
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
-            KeyCode::Char('q') => return Ok(true), // Quit
+            KeyCode::Char('q') => {
+                if app.dirty {
+                    app.show_confirm_dialog = true;
+                    app.confirm_message = "You have unsaved changes. Quit anyway?".to_string();
+                    app.confirm_pending_quit = true;
+                    // Wait for confirmation
+                    return Ok(false);
+                }
+                return Ok(true)
+            }, // Quit
             KeyCode::Char('h') | KeyCode::F(1) => {
                 app.show_help = !app.show_help;
                 return Ok(false);
@@ -1023,12 +1042,20 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
                 handle_editor_key_vi(app, key);
                 return Ok(false);
             }
-            // Quit when help is open; otherwise quit
+            // Hide help if it's open; otherwise confirm-or-quit
             if app.show_help {
                 app.show_help = false;
                 Ok(false)
             } else {
-                Ok(true)
+                if app.dirty {
+                    app.show_confirm_dialog = true;
+                    app.confirm_message = "You have unsaved changes. Quit anyway?".to_string();
+                    app.confirm_pending_quit = true;
+                    // Wait for confirmation
+                    Ok(false)
+                } else {
+                    Ok(true) // Quit
+                }
             }
         }
         _ => match app.focused {
@@ -1456,6 +1483,13 @@ fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
                         set_status(app, "Open failed");
                     }
                 }
+            } else if app.confirm_pending_quit {
+                // Quit confirmed
+                app.confirm_pending_quit = false;
+                // Hide confirm dialog
+                app.show_confirm_dialog = false;
+                // Signal to main loop to exit
+                app.should_quit = true;
             } else {
                 // No pending action; just close
                 app.show_confirm_dialog = false;
@@ -1471,6 +1505,8 @@ fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
             // Keep the pending path so the user can adjust; or clear it
             // Clear to avoid accidental reuse
             app.confirm_pending_open = None;
+            app.confirm_pending_quit = false;
+            app.show_confirm_dialog = false;
         }
         _ => {}
     }
@@ -1519,6 +1555,7 @@ fn handle_input_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
     }
     Ok(())
 }
+
 fn nth_char_to_byte_idx(s: &str, nth: usize) -> usize {
     if nth == 0 {
         return 0;
