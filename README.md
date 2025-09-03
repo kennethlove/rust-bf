@@ -35,6 +35,8 @@ If you want to build from source:
 
 The `read` command interprets and runs Brainfuck code. It prints a trailing newline after execution.
 
+![Example of read command](imgs/reader.png)
+
 Flags:
 - `--debug` or `-d`: run in debug mode (prints a step-by-step table)
 - `--memory <size>` or `-m <size>`: set custom memory tape size (default: 30,000 cells)
@@ -78,6 +80,8 @@ Notes:
 
 Generate Brainfuck code that prints the provided input.
 
+![Example of write command](imgs/writer.png)
+
 Examples:
 - From positional args (recommended with Cargo; note the `--` separator):
   - `cargo run -- write "Hello world"`
@@ -93,6 +97,8 @@ The output is Brainfuck code printed to stdout (a trailing newline is added for 
 ## CLI usage (REPL)
 
 Interactive REPL for Brainfuck code execution.
+
+![Example of repl command](imgs/repl.png)
 
 - Start the REPL:
   - `cargo run -- repl`
@@ -192,6 +198,8 @@ Key bindings (quick reference)
 ## CLI usage (IDE)
 
 IDE for Brainfuck code authoring.
+
+![Example of IDE command](imgs/ide.png)
 
 - Start the IDE:
     - `cargo run -- ide`
