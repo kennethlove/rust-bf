@@ -632,6 +632,7 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
         Line::raw("Ctrl+E: Toggle output mode (Raw/Esc)"),
         Line::raw("F1/Ctrl+H: Toggle this help"),
         Line::raw("Ctrl+L: Toggle line numbers"),
+        Line::raw("Ctrl+P: Jump to matching bracket, [ or ]"),
         Line::raw(""),
         Line::raw("Editor: Arrows, PageUp/PageDown, Home/End, typing, Enter, Backspace"),
         Line::raw("Tape pane: [ and ] to shift window"),
@@ -1216,6 +1217,14 @@ fn handle_editor_key(app: &mut App, key: KeyEvent) {
                 app.show_line_numbers = !app.show_line_numbers;
             }
         }
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                if !jump_to_matching_bracket(app) {
+                    set_status(app, "No matching bracket at cursor")
+                }
+                return;
+            }
+        }
         KeyCode::Char(ch) => {
             // Only insert when no modifiers are held; avoid inserting on Ctrl/Alt/Shift combos
             if key.modifiers.is_empty() && !ch.is_control() {
@@ -1362,6 +1371,14 @@ fn handle_editor_key_vi(app: &mut App, key: KeyEvent) {
                     app.cursor_col = app.buffer[app.cursor_row].chars().count();
                     ensure_cursor_visible(app);
                     consumed = true;
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    if key.modifiers.contains(KeyModifiers::CONTROL) {
+                        if !jump_to_matching_bracket(app) {
+                            set_status(app, "No matching bracket at cursor")
+                        }
+                        consumed = true;
+                    }
                 }
                 KeyCode::Enter => {
                     // In Normal mode, Enter: do nothing
@@ -1699,6 +1716,29 @@ fn find_matching_bracket(app: &App, pos: (usize, usize)) -> Option<(usize, usize
         }
     }
     None
+}
+
+fn jump_to_matching_bracket(app: &mut App) -> bool {
+    // Must be on a `[` or `]` character to jump
+    let line = match app.buffer.get(app.cursor_row) {
+        Some(l) => l,
+        None => return false,
+    };
+    let len_chars = line.chars().count();
+    if app.cursor_col >= len_chars {
+        return false;
+    }
+    let cur_ch = line.chars().nth(app.cursor_col).unwrap_or('\0');
+    if cur_ch != '[' && cur_ch != ']' {
+        return false;
+    }
+
+    if let Some((r, c)) = find_matching_bracket(app, (app.cursor_row, app.cursor_col)) {
+        app.cursor_row = r;
+        app.cursor_col = c;
+        ensure_cursor_visible(app);
+        true
+    } else { false }
 }
 
 struct Mapping {
