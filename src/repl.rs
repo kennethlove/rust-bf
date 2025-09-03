@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use reedline::{Signal, DefaultPrompt, DefaultPromptSegment, HistoryItem, Highlighter, StyledText};
 use nu_ansi_term::Style;
-use crate::{cli_util, BrainfuckReader, BrainfuckReaderError};
+use crate::{cli_util, BrainfuckReader, BrainfuckReaderError, bf_only};
+use crate::cli_util::rat_to_nu;
 use crate::reader::StepControl;
 
 pub fn repl_loop() -> io::Result<()> {
@@ -100,7 +101,7 @@ fn init_line_editor() -> io::Result<reedline::Reedline> {
     let history = reedline::FileBackedHistory::new(1_000).unwrap();
 
     let editor = Reedline::create()
-        .with_highlighter(Box::new(BrainfuckHighlighter::new_catppuccin_mocha()))
+        .with_highlighter(Box::new(BrainfuckHighlighter::new_from_config()))
         .with_history(Box::new(history))
         .with_edit_mode(Box::new(Emacs::new(keybindings)));
 
@@ -163,12 +164,6 @@ fn read_submission_interactive(editor: &mut reedline::Reedline) -> io::Result<Op
 
 }
 
-/// Keep only Brainfuck instruction characters
-fn bf_only(s: &str) -> String {
-    s.chars()
-        .filter(|c| matches!(c, '>' | '<' | '+' | '-' | '.' | ',' | '[' | ']'))
-        .collect()
-}
 
 /// Executes a single Brainfuck program contained in `buffer`.
 /// - Program output goes to stdout.
@@ -301,24 +296,21 @@ struct BrainfuckHighlighter {
 }
 
 impl BrainfuckHighlighter {
-    fn new_catppuccin_mocha() -> Self {
-        use crate::theme::catppuccin::Mocha as P;
+    fn new_from_config() -> Self {
+        use crate::config::colors;
 
-        // Character mapping
-        // > <   => SKY/TEAL (movement)
-        // + ,   => GREEN/RED (data modification)
-        // . ,   => YELLOW/PEACH (I/O)
-        // [ ]   => MAUVE (flow control)
+        // Character mapping driven by config::Colors
+        let cfg = colors();
         let mut s = Self::default();
-        s.map_gt = Style::new().fg(P::SKY).bold();
-        s.map_lt = Style::new().fg(P::TEAL).bold();
-        s.map_plus = Style::new().fg(P::GREEN).bold();
-        s.map_minus = Style::new().fg(P::RED).bold();
-        s.map_dot = Style::new().fg(P::YELLOW).bold();
-        s.map_comma = Style::new().fg(P::PEACH).bold();
-        s.map_lbracket = Style::new().fg(P::MAUVE).bold();
-        s.map_rbracket = Style::new().fg(P::MAUVE).bold();
-        s.map_other = Style::new().fg(P::SURFACE2).bold();
+        s.map_gt = Style::new().fg(rat_to_nu(cfg.editor_op_right)).bold();
+        s.map_lt = Style::new().fg(rat_to_nu(cfg.editor_op_left)).bold();
+        s.map_plus = Style::new().fg(rat_to_nu(cfg.editor_op_inc)).bold();
+        s.map_minus = Style::new().fg(rat_to_nu(cfg.editor_op_dec)).bold();
+        s.map_dot = Style::new().fg(rat_to_nu(cfg.editor_op_output)).bold();
+        s.map_comma = Style::new().fg(rat_to_nu(cfg.editor_op_input)).bold();
+        s.map_lbracket = Style::new().fg(rat_to_nu(cfg.editor_op_bracket)).bold();
+        s.map_rbracket = Style::new().fg(rat_to_nu(cfg.editor_op_bracket)).bold();
+        s.map_other = Style::new().fg(rat_to_nu(cfg.editor_non_bf)).bold();
         s
     }
 
@@ -374,9 +366,13 @@ impl Highlighter for BrainfuckHighlighter {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MetaCommand {
+    /// Exit the REPL immediately with code 0
     Exit,
+    /// Show help text
     Help,
+    /// Clear the current editing buffer
     Reset,
+    /// Print the current editing buffer to stdout or stderr
     Dump {
         with_line_numbers: bool,
         all_to_stderr: bool,

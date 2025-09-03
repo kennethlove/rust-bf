@@ -46,12 +46,13 @@ pub fn print_reader_error(program: Option<&str>, code: &str, err: &BrainfuckRead
 /// Print a concise error with instruction index and a caret context window,
 /// working with UTF-8 by slicing using char indices.
 pub fn print_error_with_context(prefix: &str, code: &str, pos: usize) {
-    use crate::theme::catppuccin::Mocha as P;
-    
+    use crate::config::colors;
+
     let is_tty = io::stderr().is_terminal();
     
     if is_tty {
-        let styled = Style::new().fg(P::RED).bold().paint(format!("{prefix} at instruction {pos}"));
+        let cfg = colors();
+                let styled = Style::new().fg(rat_to_nu(cfg.dialog_error)).bold().paint(format!("{prefix} at instruction {pos}"));
         eprintln!("{styled}");
     } else {
         eprintln!("{prefix} at instruction {pos}");
@@ -78,7 +79,8 @@ pub fn print_error_with_context(prefix: &str, code: &str, pos: usize) {
     }
     
     if is_tty {
-        let caret = Style::new().fg(P::YELLOW).bold().paint("^");
+        let cfg = colors();
+                let caret = Style::new().fg(rat_to_nu(cfg.editor_op_output)).bold().paint("^");
         eprintln!("  {}{}", spaces, caret);
     } else {
         eprintln!("  {}^", spaces);
@@ -103,3 +105,28 @@ fn char_to_byte_index(s: &str, char_idx: usize) -> usize {
 
     byte_idx
 }
+
+pub fn rat_to_nu(c: ratatui::style::Color) -> nu_ansi_term::Color {
+    use ratatui::style::Color as RColor;
+    use nu_ansi_term::Color as NColor;
+    match c {
+        RColor::Black => NColor::Black,
+        RColor::Red => NColor::Red,
+        RColor::Green => NColor::Green,
+        RColor::Yellow => NColor::Yellow,
+        RColor::Blue => NColor::Blue,
+        RColor::Magenta => NColor::Purple,
+        RColor::Cyan => NColor::Cyan,
+        RColor::Gray => NColor::LightGray,
+        RColor::DarkGray => NColor::DarkGray,
+        RColor::LightRed => NColor::LightRed,
+        RColor::LightGreen => NColor::LightGreen,
+        RColor::LightBlue => NColor::LightBlue,
+        RColor::LightMagenta => NColor::LightMagenta,
+        RColor::LightCyan => NColor::LightCyan,
+        RColor::White => NColor::White,
+        RColor::Rgb(r,g,b) => NColor::Rgb(r,g,b),
+        _ => NColor::Default,
+    }
+}
+

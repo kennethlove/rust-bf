@@ -15,7 +15,7 @@
 //! Quick start:
 //!
 //! ```no_run
-//! use bf::BrainfuckReader;
+//! use rust_bf::BrainfuckReader;
 //!
 //! // Classic "Hello World!" in Brainfuck
 //! let code = "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.";
@@ -97,6 +97,11 @@ pub struct BrainfuckReader {
     code: String,
     memory: Vec<u8>,
     pointer: usize,
+    // Optional hooks:
+    output_sink: Option<Box<dyn Fn(&[u8]) + Send + Sync>>,
+    input_provider: Option<Box<dyn Fn() -> Option<u8> + Send + Sync>>,
+    // (window_size, observer (ptr, base, window_slice))
+    tape_observer: Option<(usize, Box<dyn Fn(usize, usize, &[u8]) + Send + Sync>)>,
 }
 
 impl BrainfuckReader {
@@ -108,6 +113,9 @@ impl BrainfuckReader {
             code,
             memory: vec![0; 30000],
             pointer: 0,
+            output_sink: None,
+            input_provider: None,
+            tape_observer: None,
         }
     }
 
@@ -117,7 +125,39 @@ impl BrainfuckReader {
             code,
             memory: vec![0; memory_size],
             pointer: 0,
+            output_sink: None,
+            input_provider: None,
+            tape_observer: None,
         }
+    }
+
+    /// Provide an output sink. When set, '.' sends bytes to this sink instead of stdout.
+    /// The sink receives a slice of bytes; for Brainfuck, it will be a single-byte slice per '.'.
+    pub fn set_output_sink<F>(&mut self, sink: F)
+    where
+        F: Fn(&[u8]) + Send + Sync + 'static,
+    {
+        self.output_sink = Some(Box::new(sink));
+    }
+
+    /// Provide an input provider. When set, ',' reads from this provider instead of stdin.
+    /// Returning None indicates EOF (cell is set to 0).
+    pub fn set_input_provider<F>(&mut self, provider: F)
+    where
+        F: Fn() -> Option<u8> + Send + Sync + 'static,
+    {
+        self.input_provider = Some(Box::new(provider));
+    }
+
+    /// Provide a tape observer and desired window size.
+    pub fn set_tape_observer<F>(&mut self, window_size: usize, observer: F)
+    where
+        // ptr: absolute data pointer
+        // base: start index of the window slice (page-aligned)
+        // window: slice view of memory[base..base+window_size]
+        F: Fn(usize, usize, &[u8]) + Send + Sync + 'static,
+    {
+        self.tape_observer = Some((window_size.max(1), Box::new(observer)));
     }
 
     /// Internal executor shared by run and run_debug.
@@ -219,7 +259,13 @@ impl BrainfuckReader {
                     if debug {
                         if let Some(a) = action.as_mut() { *a = format!("Output byte '{}' (suppressed in debug)", self.memory[self.pointer] as char); }
                     } else {
-                        print!("{}", self.memory[self.pointer] as char);
+                        // Use output sink when provided; fallback to stdout.
+                        if let Some(sink) = self.output_sink.as_ref() {
+                            let b = [self.memory[self.pointer]];
+                            (sink)(&b);
+                        } else {
+                            print!("{}", self.memory[self.pointer] as char);
+                        }
                     }
                 }
                 ',' => {
@@ -227,23 +273,32 @@ impl BrainfuckReader {
                         self.memory[self.pointer] = 0; // simulate EOF
                         if let Some(a) = action.as_mut() { *a = "Read byte from stdin -> simulated EOF (set cell to 0)".to_string(); }
                     } else {
-                        // Read exactly one byte from stdin into the current cell.
-                        // On EOF, set the current cell to 0.
-                        use std::io::Read;
-                        let mut buf = [0u8; 1];
-                        match std::io::stdin().read(&mut buf) {
-                            Ok(0) => {
-                                // EOF: common BF behavior is to set cell to 0
-                                self.memory[self.pointer] = 0;
+                        // Prefer input provider when set; fall back to stdin.
+                        if let Some(provider) = self.input_provider.as_ref() {
+                            match (provider)() {
+                                Some(b) => { self.memory[self.pointer] = b; }
+                                None => { self.memory[self.pointer] = 0; } // EOF
                             }
-                            Ok(_) => {
-                                self.memory[self.pointer] = buf[0];
+                            if let Some(a) = action.as_mut() { *a = format!("Read byte from input provider -> {}", self.memory[self.pointer]); }
+                        } else {
+                            // Read exactly one byte from stdin into the current cell.
+                            // On EOF, set the current cell to 0.
+                            use std::io::Read;
+                            let mut buf = [0u8; 1];
+                            match std::io::stdin().read(&mut buf) {
+                                Ok(0) => {
+                                    // EOF: common BF behavior is to set cell to 0
+                                    self.memory[self.pointer] = 0;
+                                }
+                                Ok(_) => {
+                                    self.memory[self.pointer] = buf[0];
+                                }
+                                Err(e) => {
+                                    return Err(BrainfuckReaderError::IoError { ip: code_ptr, source: e });
+                                }
                             }
-                            Err(e) => {
-                                return Err(BrainfuckReaderError::IoError { ip: code_ptr, source: e });
-                            }
+                            if let Some(a) = action.as_mut() { *a = format!("Read byte from stdin -> {}", self.memory[self.pointer]); }
                         }
-                        if let Some(a) = action.as_mut() { *a = format!("Read byte from stdin -> {}", self.memory[self.pointer]); }
                     }
                 }
                 '[' => {
@@ -267,6 +322,13 @@ impl BrainfuckReader {
                 _ => {
                     return Err(BrainfuckReaderError::InvalidCharacter { ch: instr, ip: code_ptr });
                 }
+            }
+
+            // Notify tape observer (if any) after applying the instruction's effect.
+            if let Some((win_size, observer)) = self.tape_observer.as_ref() {
+                let base = self.pointer.saturating_sub(self.pointer % *win_size);
+                let end = (base + *win_size).min(self.memory.len());
+                (observer)(self.pointer, base, &self.memory[base..end]);
             }
 
             if debug {
