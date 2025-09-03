@@ -72,31 +72,31 @@ struct RunnerHandle {
 }
 
 pub struct App {
-    // editor
+    // Editor
     buffer: Vec<String>,
     cursor_row: usize,
     cursor_col: usize,
     scroll_row: usize,
 
-    // output pane
+    // Output pane
     output: Vec<u8>,
 
-    // tape pane
+    // Tape pane
     tape_ptr: usize,
     tape_window_base: usize,
     tape_window: [u8; 128],
 
-    // status
+    // Status
     focused: Focus,
     dirty: bool,
     filename: Option<String>,
     running: bool,
     output_mode: OutputMode,
 
-    // help
+    // Help
     show_help: bool,
 
-    // timing
+    // Timing
     last_tick: Instant,
 
     // Runner wiring
@@ -136,6 +136,9 @@ pub struct App {
     // Quit flow
     should_quit: bool,
     confirm_pending_quit: bool,
+
+    // New file
+    confirm_pending_new: bool,
 }
 
 impl Default for App {
@@ -184,6 +187,8 @@ impl Default for App {
 
             should_quit: false,
             confirm_pending_quit: false,
+
+            confirm_pending_new: false,
         }
     }
 }
@@ -622,10 +627,11 @@ fn draw_help_overlay(f: &mut Frame, area: Rect) {
 
     let mut text = vec![
         Line::raw("F5/Ctrl+R: Run"),
-        Line::raw("Ctrl+O: Open  Ctrl+S: Save"),
+        Line::raw("Ctrl+N: New file  Ctrl+O: Open  Ctrl+S: Save"),
         Line::raw("Tab/Shift+Tab: Switch pane focus"),
         Line::raw("Ctrl+E: Toggle output mode (Raw/Esc)"),
         Line::raw("F1/Ctrl+H: Toggle this help"),
+        Line::raw("Ctrl+L: Toggle line numbers"),
         Line::raw(""),
         Line::raw("Editor: Arrows, PageUp/PageDown, Home/End, typing, Enter, Backspace"),
         Line::raw("Tape pane: [ and ] to shift window"),
@@ -988,6 +994,16 @@ fn handle_key(app: &mut App, key: KeyEvent) -> io::Result<bool> {
                     OutputMode::Raw => OutputMode::Escaped,
                     OutputMode::Escaped => OutputMode::Raw,
                 };
+                return Ok(false);
+            }
+            KeyCode::Char('n') => {
+                if app.dirty {
+                    app.show_confirm_dialog = true;
+                    app.confirm_message = "You have unsaved changes. Discard and create new file?".to_string();
+                    app.confirm_pending_new = true;
+                } else {
+                    app_new_file(app);
+                }
                 return Ok(false);
             }
             _ => {}
@@ -1490,6 +1506,11 @@ fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
                 app.show_confirm_dialog = false;
                 // Signal to main loop to exit
                 app.should_quit = true;
+            } else if app.confirm_pending_new {
+                // New file confirmed
+                app.confirm_pending_new = false;
+                app.show_confirm_dialog = false;
+                app_new_file(app);
             } else {
                 // No pending action; just close
                 app.show_confirm_dialog = false;
@@ -1506,6 +1527,7 @@ fn handle_confirm_dialog_key(app: &mut App, key: KeyEvent) -> io::Result<()> {
             // Clear to avoid accidental reuse
             app.confirm_pending_open = None;
             app.confirm_pending_quit = false;
+            app.confirm_pending_new = false;
             app.show_confirm_dialog = false;
         }
         _ => {}
@@ -1924,6 +1946,25 @@ fn app_save_current(app: &mut App) -> io::Result<()> {
     app.dirty = false;
     set_status(app, &format!("Saved {}", filename));
     Ok(())
+}
+
+// Create a new untitled file in the editor (resets state)
+fn app_new_file(app: &mut App) {
+    app.buffer.clear();
+    app.buffer.push(String::new());
+    app.cursor_row = 0;
+    app.cursor_col = 0;
+    app.scroll_row = 0;
+    app.filename = None;
+    app.dirty = false;
+
+    // Reset runtime/output state
+    app.output.clear();
+    app.tape_ptr = 0;
+    app.tape_window_base = 0;
+    app.tape_window = [0u8; 128];
+
+    set_status(app, "New File");
 }
 
 // Helper: choose a new default filename in the current directory.
